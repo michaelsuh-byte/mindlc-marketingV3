@@ -21,7 +21,7 @@ import {
   Quote,
   Skull,
   Lock,
-  MessageSquareEdit,
+  Edit3,
   XCircle,
   Trophy,
 } from "lucide-react";
@@ -320,7 +320,7 @@ export function CampaignCoPilotView() {
                         }`}
                         title="Conversational refinement works even when Weekly Reality Gate is LOCKED"
                       >
-                        <MessageSquareEdit className="w-3.5 h-3.5" />
+                        <Edit3 className="w-3.5 h-3.5" />
                         {isBeingRevised
                           ? "Refining in Chat..."
                           : "Refine in Chat"}
