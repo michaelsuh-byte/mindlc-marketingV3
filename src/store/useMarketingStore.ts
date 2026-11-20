@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import {
+  ActiveBottleneckStage,
   Asset,
   AssetPlatform,
   BrandPersona,
@@ -8,18 +9,25 @@ import {
   ChatMessage,
   CompetitorProfile,
   DetailLevel,
+  HITLProposalState,
   MarketingAgent,
   MarketingSkill,
   OntarioTrendSignal,
   PlanHorizon,
   PlannedActivity,
   PlanQaExchange,
+  RealityGateStatus,
   UserRecord,
+  VerbatimParentQuote,
+  WeeklyFunnelMetrics,
+  WeeklyRealityLog,
 } from "@/types/database";
 import {
+  checkBottleneckScopeDrift,
   evaluateCmoPlanQuestionAndAdjust,
   executeAutonomousAgentTask,
   generateMarketingResponse,
+  getBottleneckStageForStudents,
 } from "@/services/marketingAi";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
@@ -46,6 +54,20 @@ interface MarketingState {
   lastHighlightedAssetId: string | null;
   brandPersona: BrandPersona;
 
+  // SAFEGUARD 1: Weekly Reality Gate State
+  realityGateStatus: RealityGateStatus;
+  pilotWeek0Used: boolean;
+  weeklyRealityLogs: WeeklyRealityLog[];
+  isRealityGateModalOpen: boolean;
+
+  // SAFEGUARD 2: Single-Bottleneck Lock-In Engine (0-100 Paid Students @ $139 CAD/mo)
+  paidStudentCount: number;
+  activeBottleneckStage: ActiveBottleneckStage;
+  pendingScopeDriftCommand: string | null;
+
+  // SAFEGUARD 3 & 4: Conversational Refinement Target & HITL State Machine
+  activeRevisionAssetId: string | null;
+
   // Market, Competitor & Ontario Education Trend State
   ontarioTrends: OntarioTrendSignal[];
   competitors: CompetitorProfile[];
@@ -66,9 +88,37 @@ interface MarketingState {
   setDetailLevel: (level: DetailLevel) => void;
   setPreferredPlatform: (platform: AssetPlatform) => void;
   setActiveHorizon: (horizon: PlanHorizon) => void;
+  setActiveRevisionAssetId: (assetId: string | null) => void;
 
-  // Dual-Pane Co-Pilot Command Action
-  sendCopilotCommand: (userCommand: string) => Promise<void>;
+  // Safeguard 1 Actions (Weekly Reality Gate)
+  setRealityGateModalOpen: (open: boolean) => void;
+  toggleRealityGateLockSimulation: () => void;
+  submitWeeklyRealityLog: (payload: {
+    week_start_date: string;
+    funnel_metrics: WeeklyFunnelMetrics;
+    verbatim_parent_quotes: Omit<VerbatimParentQuote, "id" | "week_start_date">[];
+    top_winning_touchpoint: string;
+  }) => void;
+  activatePilotWeek0Override: () => void;
+
+  // Safeguard 2 Actions (Single-Bottleneck Lock-In Engine)
+  setPaidStudentCount: (count: number) => void;
+
+  // Dual-Pane Co-Pilot Command Action (Enforces Reality Gate + Bottleneck Lock + Schema)
+  sendCopilotCommand: (
+    userCommand: string,
+    explicitStageOverride?: boolean
+  ) => Promise<void>;
+
+  // HITL State Machine Actions on Proposal Cards
+  toggleProposalVerification: (
+    assetId: string,
+    field: "devils_advocate_verified" | "kill_criteria_acknowledged"
+  ) => void;
+  transitionProposalHitlState: (
+    assetId: string,
+    nextState: HITLProposalState
+  ) => void;
 
   // Market & Competitor Intel Actions
   addScannedCompetitor: (comp: CompetitorProfile) => void;
@@ -96,7 +146,7 @@ interface MarketingState {
   createCampaign: (title: string) => void;
   toggleCampaignStatus: (campaignId: string) => void;
 
-  // Skill Library CRUD Actions (Page 2)
+  // Skill Library CRUD Actions
   createSkill: (
     skill_name: string,
     system_prompt: string,
@@ -110,103 +160,280 @@ interface MarketingState {
   ) => void;
   deleteSkill: (id: string) => void;
 
-  // AI Settings & Persona Actions (Page 3)
+  // AI Settings & Persona Actions
   updateBrandPersona: (partial: Partial<BrandPersona>) => void;
 }
+
+const INITIAL_REALITY_LOGS: WeeklyRealityLog[] = [
+  {
+    id: "wrl-2026-11-16",
+    week_start_date: "2026-11-16",
+    created_at: "2026-11-16T09:00:00Z",
+    funnel_metrics: {
+      reach_or_contacts: 64,
+      diag_booked: 18,
+      diag_completed: 14,
+      paid_conversions: 3,
+    },
+    top_winning_touchpoint:
+      "10-minute Zoom parent debrief walking through the student's timestamped Socratic stall on Question 4 (MCR3U Functions word problem)",
+    verbatim_parent_quotes: [
+      {
+        id: "VOC-101",
+        context_tag: "ai_cheating",
+        week_start_date: "2026-11-16",
+        quote_text:
+          "My son already uses ChatGPT to finish homework in 5 minutes and then gets 58% on his MCR3U Functions unit test because he blanks out without his phone.",
+      },
+      {
+        id: "VOC-102",
+        context_tag: "price",
+        week_start_date: "2026-11-16",
+        quote_text:
+          "We already burned $380/month at Mathnasium—how do I know $139/month won't just be another subscription he ignores after week two?",
+      },
+      {
+        id: "VOC-103",
+        context_tag: "student_motivation",
+        week_start_date: "2026-11-16",
+        quote_text:
+          "If I still have to sit at the kitchen table nagging him to log in every Tuesday night, it doesn't save me any stress.",
+      },
+      {
+        id: "VOC-104",
+        context_tag: "curriculum",
+        week_start_date: "2026-11-16",
+        quote_text:
+          "His teacher marks Thinking and Application word problems super strictly—generic American practice apps don't match Ontario MPM2D or MCR3U tests.",
+      },
+    ],
+  },
+];
 
 const INITIAL_SKILLS: MarketingSkill[] = [
   {
     id: "skill-copywriting",
     skill_name: "copywriting",
-    category: "Conversion & Messaging",
+    category: "Stage 1–3 Conversion Copy",
     system_prompt:
-      "You are an elite EdTech conversion copywriter trained on PAS (Problem-Agitate-Solve), Before-After-Bridge, and JTBD frameworks. Write high-converting landing page and campaign copy for MindLC. Emphasize clarity over cleverness, address Ontario parents' anxiety around Grade 7-12 Math (EQAO Grade 9, MCR3U Grade 11 Functions, MHF4U/MCV4U Grade 12), and contrast passive video tutoring or generic chatbots against MindLC's dual model: a dedicated Human Learning Manager for weekly accountability + 24/7 Socratic AI that never just hands over the answer.",
-  },
-  {
-    id: "skill-ai-seo",
-    skill_name: "ai-seo",
-    category: "Organic & AI Search (AEO/GEO)",
-    system_prompt:
-      "You are an AI Search & SEO Architect specializing in Answer Engine Optimization (AEO/GEO) for ChatGPT, Perplexity, Google AI Overviews, and Ontario high-intent organic search. Structure content with self-contained 40-60 word answer blocks, question-based H2 headings, Ontario curriculum course codes (MTH1W, MPM2D, MCR3U, MHF4U, MCV4U), and verifiable statistics so both Google and LLMs cite MindLC as the premier Ontario math learning system.",
-  },
-  {
-    id: "skill-social-content",
-    skill_name: "social-content",
-    category: "Paid & Organic Social",
-    system_prompt:
-      "You are a high-empathy paid & organic social strategist for Facebook, Instagram, and LinkedIn targeting Ontario parents of Grade 7-12 students. Use scroll-stopping hooks rooted in real kitchen-table math frustration ('9:45 PM before a Grade 11 Functions unit test...'), clear emotional validation, and a low-friction CTA to book a Free MindLC Diagnostic & Learning Manager Consult.",
-  },
-  {
-    id: "skill-copy-editing",
-    skill_name: "copy-editing",
-    category: "Editorial & Polish",
-    system_prompt:
-      "You are a ruthless Seven-Sweeps Copy Editor. Audit and rewrite existing MindLC copy across 7 passes: (1) Clarity, (2) Voice & Tone, (3) So-What benefit test, (4) Prove-It specificity check, (5) Specificity upgrade, (6) Heightened parent/student emotion, and (7) Zero-Risk CTA friction removal.",
+      "You are an elite EdTech conversion copywriter trained on PAS, JTBD Four Forces, and VoC mirroring. Write high-converting assets for MindLC's Tier 2 Managed Hybrid Plan ($139 CAD/month) targeting the first 100 paid Ontario Grades 9–12 STEM students.",
   },
   {
     id: "skill-cro",
     skill_name: "cro",
-    category: "Conversion Rate Optimization",
+    category: "Stage 1 Debrief & Diagnostic CRO",
     system_prompt:
-      "You are a Conversion Rate Optimization (CRO) Lead. Analyze and structure MindLC landing pages across 7 dimensions: 5-Second Value Prop Clarity, Outcome-Driven Headline, High-Contrast Value CTA Copy, Visual Scannability, Ontario Parent Social Proof Proximity, Anti-Cheating/Socratic AI Objection Handling, and 2-Step Low-Friction Lead Capture.",
+      "You are a Conversion Rate Optimization (CRO) Lead focused on lifting Diagnostic Completed -> Paid Conversion (>= 25%) for MindLC ($139 CAD/mo Tier 2 Managed Hybrid). Optimize Cognitive Reports, 10-minute parent debrief call scripts, and 30-day risk-free guarantee framing.",
+  },
+  {
+    id: "skill-copy-editing",
+    skill_name: "copy-editing",
+    category: "Seven-Sweeps VoC Polish",
+    system_prompt:
+      "You are a ruthless Seven-Sweeps Copy Editor. Audit and rewrite MindLC proposals across Clarity, VoC Quote Alignment, Specificity ($139 CAD/mo vs $80/hr weekly tutors), and Single Lock-Step CTA.",
+  },
+  {
+    id: "skill-social-content",
+    skill_name: "social-content",
+    category: "Stage 2–3 GTA Parent Social & Ads",
+    system_prompt:
+      "You are a GTA Ontario Parent Social & Ad Strategist (Mississauga, Oakville, Markham, Toronto). Use scroll-stopping hooks rooted in verbatim WeeklyRealityLog parent quotes and hold Blended CAC < $150 CAD.",
+  },
+  {
+    id: "skill-ai-seo",
+    skill_name: "ai-seo",
+    category: "Ontario Course-Code Lead Magnets & AEO",
+    system_prompt:
+      "You are an Ontario STEM Curriculum Lead Magnet & AI-SEO Architect targeting MPM2D, MCR3U, MHF4U, MCV4U, and SBI3U unit-test prep.",
+  },
+];
+
+const INITIAL_CAMPAIGNS: Campaign[] = [
+  {
+    id: "camp-ontario-fall",
+    title: "First 100 Paid Students ($139 CAD/mo Tier 2 Managed Hybrid)",
+    status: "Approved",
+    created_at: "2026-11-01T14:00:00Z",
+  },
+  {
+    id: "camp-eqao-gr9",
+    title: "Stage 1: Diagnostic-to-Paid (>= 25%) Debrief & Follow-Up System",
+    status: "Draft",
+    created_at: "2026-11-10T09:30:00Z",
+  },
+  {
+    id: "camp-gr11-functions",
+    title: "Stage 2: Week 4–6 Parent Referral & MCR3U/SBI3U Seminar Loop",
+    status: "Draft",
+    created_at: "2026-11-15T11:15:00Z",
+  },
+];
+
+const INITIAL_ASSETS: Asset[] = [
+  {
+    id: "asset-stage1-debrief",
+    campaign_id: "camp-ontario-fall",
+    platform: "Cognitive Report & Debrief Script",
+    title:
+      "10-Min Parent Diagnostic Debrief Script & Cognitive Report Close ($139 CAD/mo Tier 2)",
+    detail_level_used: 3,
+    skill_used: "cro",
+    agent_author: "Agent-04 · Funnel CRO",
+    updated_at: "10 mins ago",
+    hitl_state: "DRAFT",
+    devils_advocate_verified: false,
+    kill_criteria_acknowledged: false,
+    revision_count: 1,
+    proposal_schema: {
+      proposal_id: "PROP-S1-1042",
+      title:
+        "10-Min Parent Diagnostic Debrief Script & Cognitive Report Close ($139 CAD/mo Tier 2)",
+      bottleneck_stage: "STAGE_1_CONVERSION",
+      channel: "1-on-1 Zoom Parent Debrief + Cognitive Diagnostic Report",
+      target_metric:
+        "Diagnostic Completed -> Paid Conversion (Current: 21% -> Target: >= 25%)",
+      cited_voc_quotes: [
+        '[VOC-101 · ai_cheating] "My son already uses ChatGPT to finish homework in 5 minutes and then gets 58% on his MCR3U Functions unit test because he blanks out without his phone."',
+        '[VOC-102 · price] "We already burned $380/month at Mathnasium—how do I know $139/month won\'t just be another subscription he ignores after week two?"',
+      ],
+      single_cta:
+        "Activate Your Teen's 30-Day Risk-Free Tier 2 Managed Hybrid Seat ($139 CAD/mo) on the Call to Lock Tomorrow's Human Learning Manager Onboarding",
+      asset_body: `## 1. Cognitive Diagnostic Report Visual Header (Minutes 0–2)
+**Courses Audited:** Ontario Grade 10–12 STEM (MPM2D · MCR3U · MHF4U · SBI3U)
+**Diagnostic Gap Identified:** Procedural Recall is **76%**, but **Unassisted Multi-Step Problem Decomposition is 44%** (Explains why homework marks are high while closed-book unit tests drop 20%+).
+
+---
+
+## 2. 10-Minute Parent Debrief Call Script
+### Minutes 0–3: Mirror Exact Parent VoC & Show Timestamped Socratic Stall
+> *"Look at Question 4 on {{student_first_name}}'s Cognitive Report. You mentioned earlier: 'My son already uses ChatGPT to finish homework in 5 minutes and then gets 58% on his MCR3U Functions unit test.' Right here at the 2-minute mark, when our Socratic AI withheld the final answer and asked him to set up the quadratic domain constraint himself, he froze. That's the exact 20-point gap on his school unit tests."*
+
+### Minutes 3–7: Present Tier 2 Managed Hybrid Plan ($139 CAD/month) vs. $380/mo Centres
+> *"At $80/hr, a private tutor ($320+/mo) is only there 1 hour a week. Our **Tier 2 Managed Hybrid Plan ($139 CAD/month — $4.63/day)** pairs:*
+> 1. **24/7 Socratic AI STEM Coach:** Gives guided step-by-step hints at 9:45 PM—never the final answer.
+> 2. **Dedicated Human Learning Manager:** Reviews {{student_first_name}}'s Socratic logs every week, assigns targeted Ontario unit-test prep, and sends you a Friday parent accountability summary."*
+
+### Minutes 7–10: 30-Day Active-Habit Guarantee & Single CTA Close
+> *"You asked: 'How do I know $139/month won't just be another subscription he ignores after week two?' Under our **30-Day Active-Habit Guarantee**, if your Human Learning Manager doesn't get {{student_first_name}} completing 3+ Socratic sessions a week in the first 30 days, you get a 100% refund with one email. Let's activate his seat now so his Learning Manager can lock his study plan before Friday's quiz."*`,
+      devils_advocate: {
+        primary_failure_hypothesis:
+          "Parents will delay ('Let me discuss with my spouse tonight') if the 10-minute debrief feels like a generic sales pitch rather than a clinical walkthrough of their child's exact Socratic reasoning stall.",
+        blind_spot_question:
+          "Are we screen-sharing the student's actual wrong step from the diagnostic within the first 90 seconds of the parent call?",
+      },
+      kill_criteria: {
+        sample_threshold: "12 consecutive 10-minute parent diagnostic debrief calls",
+        stop_loss_metric: "< 25% paid conversion into the $139 CAD/mo Tier 2 Managed Hybrid Plan within 48 hours of debrief",
+        pivot_action:
+          "Immediately switch call close offer from '$139 CAD/mo subscription' to a '$19 CAD 14-Day Unit-Test Rescue Sprint' that auto-converts to $139 CAD/mo on Day 15.",
+      },
+      revision_notes:
+        "Baseline Stage 1 Debrief & Cognitive Report proposal anchored on VOC-101 and VOC-102.",
+    },
+    content: `## 1. Cognitive Diagnostic Report Visual Header (Minutes 0–2)
+**Courses Audited:** Ontario Grade 10–12 STEM (MPM2D · MCR3U · MHF4U · SBI3U)
+**Diagnostic Gap Identified:** Procedural Recall is **76%**, but **Unassisted Multi-Step Problem Decomposition is 44%**.`,
+  },
+  {
+    id: "asset-stage1-followup",
+    campaign_id: "camp-ontario-fall",
+    platform: "Email Sequence",
+    title:
+      "72-Hour Post-Diagnostic Undecided Parent Close Sequence ($139 CAD/mo + 30-Day Guarantee)",
+    detail_level_used: 3,
+    skill_used: "copywriting",
+    agent_author: "Agent-05 · Lifecycle",
+    updated_at: "25 mins ago",
+    hitl_state: "APPROVED_FOR_EXECUTION",
+    devils_advocate_verified: true,
+    kill_criteria_acknowledged: true,
+    revision_count: 2,
+    proposal_schema: {
+      proposal_id: "PROP-S1-1043",
+      title:
+        "72-Hour Post-Diagnostic Undecided Parent Close Sequence ($139 CAD/mo + 30-Day Guarantee)",
+      bottleneck_stage: "STAGE_1_CONVERSION",
+      channel: "Post-Debrief Email + SMS Sequence (Hours +2, +24, +72)",
+      target_metric: "Diagnostic Completed -> Paid Conversion (Recover 15%+ of undecided debriefs)",
+      cited_voc_quotes: [
+        '[VOC-103 · student_motivation] "If I still have to sit at the kitchen table nagging him to log in every Tuesday night, it doesn\'t save me any stress."',
+        '[VOC-104 · curriculum] "His teacher marks Thinking and Application word problems super strictly—generic American practice apps don\'t match Ontario MPM2D or MCR3U tests."',
+      ],
+      single_cta:
+        "Click One-Tap Enrollment Link ($139 CAD/mo · 30-Day Active-Habit Refund Guarantee) to Assign Your Teen's Human Learning Manager Today",
+      asset_body: `### Touch 1 (2 Hours Post-Debrief — SMS + Email): The Cognitive Report Snapshot
+**Subject:** {{student_first_name}}'s MCR3U Cognitive Report + 30-Day Active-Habit Guarantee
+
+Hi {{parent_first_name}}, attached is {{student_first_name}}'s 1-page Ontario STEM Cognitive Report from today's diagnostic.
+To directly answer your concern (*"If I still have to sit at the kitchen table nagging him to log in every Tuesday night, it doesn't save me any stress"*):
+• **Your Human Learning Manager takes over the nagging:** Every Monday, they message {{student_first_name}} directly to lock their 3 unit-test practice blocks for the week, and every Friday you get a 60-second completion scorecard.
+• **Backed by our 30-Day Active-Habit Guarantee:** $139 CAD/month—if your teen doesn't build a 3x/week Socratic problem-solving habit in Month 1, we refund every penny.`,
+      devils_advocate: {
+        primary_failure_hypothesis:
+          "Undecided parents ignore text-heavy follow-up emails after 24 hours once the emotional urgency of the diagnostic call fades.",
+        blind_spot_question:
+          "Does Touch 1 include a personalized 45-second Loom/voice note from the exact Human Learning Manager who will coach their teen?",
+      },
+      kill_criteria: {
+        sample_threshold: "25 undecided post-diagnostic parents enrolled into the 72-hr sequence",
+        stop_loss_metric: "< 12% recovery conversion into $139 CAD/mo Tier 2 within 72 hours",
+        pivot_action:
+          "Replace Email Touch 2 (Hour 24) with a direct SMS from the Human Learning Manager offering a free live 15-minute 'Night-Before-the-Quiz' rescue check-in.",
+      },
+      revision_notes:
+        "Approved by Acting CMO after verifying Human Learning Manager voice-note attachment.",
+    },
+    content: `### Touch 1 (2 Hours Post-Debrief — SMS + Email): The Cognitive Report Snapshot`,
   },
 ];
 
 const INITIAL_ONTARIO_TRENDS: OntarioTrendSignal[] = [
   {
     id: "trend-midterm-shock",
-    title: "Ontario Semester 1 Midterm Report Cards & Parent-Teacher Interviews (TDSB, YRDSB, PDSB, HDSB)",
+    title:
+      "Ontario Semester 1 Midterm Report Cards & Parent-Teacher Interviews (TDSB, YRDSB, PDSB, HDSB)",
     category: "Ontario Academic Calendar",
     urgency: "Critical Now",
     affectedGrades: "Grades 9–12 Secondary",
-    courseCodes: ["MTH1W", "MPM2D", "MCR3U", "MHF4U", "MCV4U"],
+    courseCodes: ["MTH1W", "MPM2D", "MCR3U", "MHF4U", "MCV4U", "SBI3U"],
     parentPainSummary:
-      "Midterm marks just landed across GTA school boards. Parents seeing a 62%–74% in Grade 11 Functions (MCR3U) or Grade 12 Advanced Functions (MHF4U) realize they have 8 weeks left before final exams to protect university admissions.",
-    searchMomentum: "+68% week-over-week surge in 'Grade 11 functions tutor Ontario' & 'how to raise midterm math mark'",
+      "Midterm marks just landed across GTA school boards. Parents seeing a 62%–74% in Grade 11 Functions (MCR3U) or Biology (SBI3U) realize they have 8 weeks left before final exams.",
+    searchMomentum:
+      "+68% week-over-week surge in 'Grade 11 functions tutor Ontario' & 'how to raise midterm math mark'",
     recommendedCmoAction:
-      "Run '8-Week Semester Rescue' parent ads & landing page header offering an immediate Midterm Exam Error-Analysis Diagnostic with a Human Learning Manager.",
-    recommendedAgentId: "agent-social",
-  },
-  {
-    id: "trend-eqao-mth1w",
-    title: "Semester 1 Grade 9 De-Streamed Math (MTH1W) EQAO Assessment Preparation Window",
-    category: "EQAO & Ministry Policy",
-    urgency: "High (Next 14 Days)",
-    affectedGrades: "Grade 8 Transition & Grade 9",
-    courseCodes: ["MTH1W", "Grade 8 Foundations"],
-    parentPainSummary:
-      "Since Ontario de-streamed Grade 9 math into a single MTH1W course, teachers move rapidly through algebraic modelling and linear relations. EQAO counts for up to 10–15% of the final course mark.",
-    searchMomentum: "+54% surge in 'Grade 9 EQAO math practice tests Ontario' and 'MTH1W tutoring'",
-    recommendedCmoAction:
-      "Publish a free downloadable 'MTH1W EQAO Multi-Step Problem Guide' gated behind a 2-step Parent Diagnostic booking.",
-    recommendedAgentId: "agent-seo",
-  },
-  {
-    id: "trend-anti-chatbot-cheating",
-    title: "Parent Backlash Against Teens Using ChatGPT / Photomath as Homework Shortcuts",
-    category: "Parent Search & Social Signal",
-    urgency: "Critical Now",
-    affectedGrades: "Grades 7–12",
-    courseCodes: ["MTH1W", "MPM2D", "MCR3U", "MHF4U"],
-    parentPainSummary:
-      "Parents report their teens get 95% on take-home assignments by copying AI answers, then score 54% on closed-book in-class unit tests because they never learned the underlying math steps.",
-    searchMomentum: "+81% rise in AI search queries for 'AI math tutor that doesn't give the answer' and 'Socratic math tutor'",
-    recommendedCmoAction:
-      "Anchor all top-of-funnel messaging on MindLC's Socratic Guardrail: 'Never gives the final answer—asks guided step-by-step questions like an elite teacher.'",
+      "In Stage 1: Use Midterm Report Card urgency inside the 10-Min Diagnostic Debrief close script to lock $139 CAD/mo enrollments within 48 hours.",
     recommendedAgentId: "agent-cro",
   },
   {
-    id: "trend-ouac-cutoff",
-    title: "OUAC University Application Deadlines & Grade 12 Top-6 Prerequisite Compression",
-    category: "OUAC University Admissions",
-    urgency: "Strategic Window",
-    affectedGrades: "Grades 11 & 12 University Track",
-    courseCodes: ["MCR3U", "MHF4U", "MCV4U"],
+    id: "trend-anti-chatbot-cheating",
+    title:
+      "Parent Backlash Against Teens Using ChatGPT / Photomath as Homework Shortcuts",
+    category: "Parent Search & Social Signal",
+    urgency: "Critical Now",
+    affectedGrades: "Grades 9–12 STEM",
+    courseCodes: ["MPM2D", "MCR3U", "MHF4U", "SBI3U"],
     parentPainSummary:
-      "Waterloo, U of T, McMaster, Queen's, and Western Engineering/Business/CS programs require mid-80s to low-90s in MHF4U and MCV4U. Early conditional offers rely heavily on Grade 11 MCR3U and Semester 1 MHF4U marks.",
-    searchMomentum: "+49% search lift for 'MHF4U advanced functions tutor Ontario' & 'MCV4U calculus prep'",
+      "Parents report their teens get 95% on take-home assignments by copying AI answers, then score 54% on closed-book in-class unit tests.",
+    searchMomentum:
+      "+81% rise in queries for 'AI math tutor that doesn't give the answer' and 'Socratic math tutor'",
     recommendedCmoAction:
-      "Deploy 'University Prerequisite Protection' campaign targeting parents of Grade 11/12 STEM & Business applicants.",
+      "Show the student's unassisted Socratic stall vs. ChatGPT answer-copying in Minutes 0–3 of the Parent Debrief.",
+    recommendedAgentId: "agent-cro",
+  },
+  {
+    id: "trend-eqao-mth1w",
+    title:
+      "Semester 1 Grade 9 De-Streamed Math (MTH1W) & Grade 10 (MPM2D) Unit-Test Bottleneck",
+    category: "EQAO & Ministry Policy",
+    urgency: "High (Next 14 Days)",
+    affectedGrades: "Grades 9 & 10",
+    courseCodes: ["MTH1W", "MPM2D"],
+    parentPainSummary:
+      "Ontario Ministry rubrics heavily weight Thinking & Application multi-step word problems where worksheet drilling fails.",
+    searchMomentum:
+      "+54% surge in 'Grade 9 EQAO math practice tests Ontario' and 'MPM2D unit test prep'",
+    recommendedCmoAction:
+      "In Stage 2: Deploy MPM2D & MCR3U Unit-Test Prep Lead Magnets through local parent communities.",
     recommendedAgentId: "agent-lifecycle",
   },
 ];
@@ -218,32 +445,33 @@ const INITIAL_COMPETITORS: CompetitorProfile[] = [
     archetype: "Franchise Learning Centre",
     websiteUrl: "https://www.mathnasium.ca",
     pricingModel: "$320–$550/month + registration fees (2 fixed drop-off slots/week)",
-    theirPrimaryPitch: "In-person neighbourhood math centres with structured worksheet progressions.",
+    theirPrimaryPitch:
+      "In-person neighbourhood math centres with structured worksheet progressions.",
     ontarioParentComplaint:
-      "\"I'm tired of driving through Ontario winter traffic twice a week just for my Grade 10/11 teen to fill out generic arithmetic worksheets while a college student watches 5 kids at once.\"",
+      "\"We already burned $380/month at Mathnasium—my Grade 11 teen sat filling out generic worksheets while a college student watched 5 kids at once.\"",
     structuralWeakness:
-      "Strong for K–6 arithmetic drill, but poorly equipped for Ontario Grades 9–12 Ministry Thinking & Application word problems (MTH1W, MCR3U, MHF4U, MCV4U) and completely closed at 9:45 PM when homework panic hits.",
+      "Poorly equipped for Ontario Grades 9–12 Ministry Thinking & Application word problems (MPM2D, MCR3U, MHF4U, SBI3U) and closed at 9:45 PM when homework panic hits.",
     mindlcCounterWedge:
-      "Zero winter driving + 24/7 Socratic AI tuned specifically to Ontario Grades 7–12 course codes + a 1-on-1 Human Learning Manager who tracks actual school unit tests instead of generic worksheets.",
+      "$139 CAD/mo Tier 2 Managed Hybrid ($240/mo cheaper than centres) + 24/7 Socratic AI tuned to Ontario course codes + 1-on-1 Human Learning Manager accountability.",
     recommendedConversionPlay:
-      "Run 'Stop Driving to Worksheet Centres' Facebook Ad + Comparison Page with a 'Switch & Save' Free Diagnostic.",
+      "Use the '$380/mo Worksheet Centre vs. $139/mo Managed Hybrid' anchor table on Page 2 of the Cognitive Diagnostic Report.",
     lastScannedAt: "Verified Today",
   },
   {
     id: "comp-hourly-tutors",
-    name: "1-on-1 Private & Marketplace Tutors (Varsity Tutors / Superprof / $80/hr Private)",
+    name: "1-on-1 Private & Marketplace Tutors ($75–$95/hr Private / Varsity Tutors)",
     archetype: "1-on-1 Hourly Marketplace",
     websiteUrl: "https://www.varsitytutors.com",
-    pricingModel: "$65–$95/hour (typically 1 hour per week = $320–$380/mo)",
+    pricingModel: "$75–$95/hour (1 hr/week = $320–$380/mo)",
     theirPrimaryPitch: "1-on-1 live video or in-home tutoring sessions once a week.",
     ontarioParentComplaint:
-      "\"The tutor explains it on Sunday afternoon and my son nods along, but when he gets stuck on Wednesday night homework before Thursday's quiz, the tutor isn't there.\"",
+      "\"The tutor explains it on Sunday afternoon, but when my son gets stuck on Wednesday night MCR3U homework before Thursday's test, nobody is there.\"",
     structuralWeakness:
-      "The '6-Day Homework Gap': 1 hour of passive explanation per week does not build daily problem-solving habits, and there is zero mid-week support or structured daily accountability.",
+      "The '6-Day Homework Gap': 1 hour of passive explanation per week does not build daily problem-solving habits.",
     mindlcCounterWedge:
-      "Continuous 7-day coverage: Your Human Learning Manager sets the weekly study plan and accountability checkpoints, while our 24/7 Socratic AI coaches your teen through Tuesday and Wednesday night homework in real time.",
+      "7-day coverage for less than the price of 2 tutor hours/month ($139 CAD/mo): Weekly Human Learning Manager check-ins + 24/7 Socratic AI guided hints.",
     recommendedConversionPlay:
-      "Publish 'The 6-Day Tutoring Gap' calculator & blog post on the landing page.",
+      "Highlight 'The 6-Day Tutoring Gap' during Minutes 3–6 of the Parent Diagnostic Debrief.",
     lastScannedAt: "Verified Today",
   },
   {
@@ -251,413 +479,226 @@ const INITIAL_COMPETITORS: CompetitorProfile[] = [
     name: "Generic AI Chatbots & Photo-Solvers (ChatGPT / Photomath / Gauth)",
     archetype: "Generic AI Answer Solver",
     websiteUrl: "https://photomath.com",
-    pricingModel: "Free – $20/month self-serve app",
-    theirPrimaryPitch: "Snap a photo or paste any math problem to get an instant step-by-step solution.",
+    pricingModel: "Free – $28 CAD/month self-serve app",
+    theirPrimaryPitch:
+      "Snap a photo or paste any math problem to get an instant step-by-step solution.",
     ontarioParentComplaint:
-      "\"My teen uses it to finish homework in 10 minutes without thinking, and then bombs the actual closed-book test in class!\"",
+      "\"My son already uses ChatGPT to finish homework in 5 minutes and then gets 58% on his MCR3U Functions unit test!\"",
     structuralWeakness:
-      "Hands over the final answer immediately (cognitive offloading) and has zero human oversight—so unmotivated teens either use it to cheat or stop using it altogether.",
+      "Hands over the final answer immediately (cognitive offloading) and has zero human accountability.",
     mindlcCounterWedge:
-      "Socratic Guardrail + Human Manager: MindLC's AI is hard-coded NEVER to give away the final answer—it prompts the student with guided hints—and a real Human Learning Manager audits their session logs weekly.",
+      "Socratic Guardrail + Human Learning Manager: MindLC never gives the final answer—it prompts the teen with guided questions and reports weekly progress to parents.",
     recommendedConversionPlay:
-      "Embed an interactive 'ChatGPT vs. MindLC Socratic AI' side-by-side comparison card above the fold.",
-    lastScannedAt: "Verified Today",
-  },
-  {
-    id: "comp-passive-portals",
-    name: "Passive Self-Study Portals (TVO Learn Mathify / Khan Academy / IXL)",
-    archetype: "Passive Self-Study Portal",
-    websiteUrl: "https://tvolearn.com",
-    pricingModel: "Free – $20/month self-initiated portal",
-    theirPrimaryPitch: "Free on-demand videos, practice drills, or drop-in anonymous chat board.",
-    ontarioParentComplaint:
-      "\"It's free, which is great in theory, but my 15-year-old never logs in unless I nag them for an hour every night.\"",
-    structuralWeakness:
-      "100% reliant on teen self-motivation. Without a dedicated human mentor holding the student accountable each week, usage drops to zero within 10 days.",
-    mindlcCounterWedge:
-      "We remove parent nagging from the equation: your dedicated Human Learning Manager owns the weekly check-ins, study schedule, and parent progress reports.",
-    recommendedConversionPlay:
-      "Highlight 'End Kitchen-Table Homework Nagging' in parent email and social hooks.",
+      "Show side-by-side 'ChatGPT Answer-Dump vs. MindLC Socratic Hint' in the Post-Diagnostic Follow-Up email.",
     lastScannedAt: "Verified Today",
   },
 ];
 
 const INITIAL_AGENTS: MarketingAgent[] = [
   {
-    id: "agent-intel",
-    codeName: "Agent-01 · Intel",
-    roleTitle: "Ontario Market & Competitor Intel Agent",
-    specialty:
-      "Monitors Ontario school board exam calendars, EQAO/OUAC windows, and competitor pricing/copy shifts.",
-    primarySkillName: "ai-seo",
-    targetPlatform: "Blog",
-    funnelFocus: "Lead Generation",
-    status: "Idle / Ready",
-    tasksCompletedCount: 4,
-    conversionMetricOwned: "Market Signal Velocity & Competitor Win-Rate",
-  },
-  {
-    id: "agent-seo",
-    codeName: "Agent-02 · AI-SEO",
-    roleTitle: "AI-SEO & Course-Code Discovery Agent",
-    specialty:
-      "Builds MTH1W, MCR3U, MHF4U & MCV4U search pages and 50-word AEO citation blocks for ChatGPT & Perplexity.",
-    primarySkillName: "ai-seo",
-    targetPlatform: "SEO Meta",
-    funnelFocus: "Lead Generation",
-    status: "Idle / Ready",
-    tasksCompletedCount: 7,
-    conversionMetricOwned: "Organic & AI-Referred Parent Diagnostic Traffic",
-  },
-  {
-    id: "agent-social",
-    codeName: "Agent-03 · Paid Social",
-    roleTitle: "Ontario Parent Paid Social & Creative Agent",
-    specialty:
-      "Writes high-empathy Meta/Instagram parent ad sets ('9:45 PM homework wall') with low-CPL diagnostic hooks.",
-    primarySkillName: "social-content",
-    targetPlatform: "Facebook",
-    funnelFocus: "Lead Generation",
-    status: "Idle / Ready",
-    tasksCompletedCount: 9,
-    conversionMetricOwned: "Cost Per Booked Diagnostic (Target CPL < $26)",
-  },
-  {
     id: "agent-cro",
-    codeName: "Agent-04 · Funnel CRO",
-    roleTitle: "Landing Page & Diagnostic Funnel CRO Agent",
+    codeName: "Agent-04 · Stage-1 CRO",
+    roleTitle: "Diagnostic-to-Paid Conversion & Debrief Agent",
     specialty:
-      "Optimizes above-the-fold hero copy, 2-step diagnostic booking forms, and Socratic vs. Chatbot proof blocks.",
+      "Optimizes Cognitive Reports, 10-min parent debrief scripts, and $139 CAD/mo 30-day guarantee framing.",
     primarySkillName: "cro",
-    targetPlatform: "Landing Page",
+    targetPlatform: "Cognitive Report & Debrief Script",
     funnelFocus: "Conversion Optimization",
     status: "Idle / Ready",
     tasksCompletedCount: 6,
-    conversionMetricOwned: "Visitor-to-Booked-Diagnostic Conversion Rate (Target ≥ 7.2%)",
+    conversionMetricOwned: "Diagnostic Completed -> Paid >= 25% (Stage 1 Lock)",
   },
   {
     id: "agent-lifecycle",
-    codeName: "Agent-05 · Lifecycle",
-    roleTitle: "Parent Nurture, Close & School Outbound Agent",
+    codeName: "Agent-05 · Lifecycle & Referrals",
+    roleTitle: "Post-Diagnostic Follow-Up & Week 4–6 Referral Agent",
     specialty:
-      "Runs post-diagnostic parent close sequences, guidance counselor outreach, and parent referral loops.",
+      "Runs 72-hr undecided parent follow-up sequences and Stage 2 Week 4–6 parent referral & seminar flows.",
     primarySkillName: "copywriting",
     targetPlatform: "Email Sequence",
     funnelFocus: "Parent Retention & Referral",
     status: "Idle / Ready",
     tasksCompletedCount: 5,
-    conversionMetricOwned: "Diagnostic Show-Up (85%+) & Paid Enrollment Close Rate (40%+)",
+    conversionMetricOwned: "72-Hr Undecided Recovery & Stage 2 Referral >= 40%",
+  },
+  {
+    id: "agent-seo",
+    codeName: "Agent-02 · STEM Lead Magnets",
+    roleTitle: "Ontario Course-Code Lead Magnet & Seminar Agent",
+    specialty:
+      "Builds MPM2D, MCR3U, MHF4U & SBI3U unit-test prep kits and community seminar funnels (Stage 2).",
+    primarySkillName: "ai-seo",
+    targetPlatform: "Parent Referral & Seminar Kit",
+    funnelFocus: "Lead Generation",
+    status: "Idle / Ready",
+    tasksCompletedCount: 7,
+    conversionMetricOwned: "Community/Seminar -> Diagnostic Booked >= 40%",
+  },
+  {
+    id: "agent-social",
+    codeName: "Agent-03 · Stage-3 GTA Ads",
+    roleTitle: "GTA Meta/Google Ad Scaling Agent (Locked in Stage 1)",
+    specialty:
+      "Scales Mississauga, Oakville, Markham & Toronto parent ads once Stage 3 (61–100 students) unlocks.",
+    primarySkillName: "social-content",
+    targetPlatform: "Facebook",
+    funnelFocus: "Lead Generation",
+    status: "Idle / Ready",
+    tasksCompletedCount: 4,
+    conversionMetricOwned: "Stage 3 GTA Blended CAC < $150 CAD",
+  },
+  {
+    id: "agent-intel",
+    codeName: "Agent-01 · VoC & Reality Intel",
+    roleTitle: "Weekly Reality Gate & VoC Objection Auditor",
+    specialty:
+      "Audits weekly funnel drop-offs, parent verbatim quotes, and competitor pricing shifts.",
+    primarySkillName: "copy-editing",
+    targetPlatform: "Cognitive Report & Debrief Script",
+    funnelFocus: "Conversion Optimization",
+    status: "Idle / Ready",
+    tasksCompletedCount: 4,
+    conversionMetricOwned: "VoC Objection Resolution & Stop-Loss Compliance",
   },
 ];
 
-// Concrete, zero-jargon multi-horizon activities across Daily, Weekly, Monthly, Quarterly, and Annual!
 const INITIAL_PLANNED_ACTIVITIES: PlannedActivity[] = [
-  // ==================== DAILY HORIZON ====================
   {
     id: "act-daily-1",
     horizon: "Daily",
-    timeWindow: "Today · 09:00 AM EST",
-    title: "Deploy GTA Midterm Report Card Rescue Ad Set for Grade 11 Functions (MCR3U)",
+    timeWindow: "Today · Stage 1 Priority #1",
+    title:
+      "Deploy 10-Minute Parent Diagnostic Debrief Script with Timestamped Socratic Error Trace ($139 CAD/mo Close)",
     tacticalExecution:
-      "Launch 3 Meta parent ad variations targeting Ontario parents (ages 38–55 in Toronto, York, Peel, Halton, Ottawa) whose teens just received a sub-78% midterm mark in MCR3U. Hook: '8 weeks left to rescue their MCR3U Functions mark before Semester 1 finals—without $80/hr once-a-week tutor gaps.'",
+      "Equip Human Learning Managers on today's diagnostic debrief calls with the 3-part close script: (Min 0–3) Screen-share the student's unassisted stall on Question 4 vs. ChatGPT shortcutting (VOC-101); (Min 3–7) Anchor $139 CAD/mo Tier 2 Managed Hybrid against $380/mo Mathnasium (VOC-102); (Min 7–10) Close with the 30-Day Active-Habit Refund Guarantee.",
     deliverableSpec:
-      "3 Facebook/Instagram Parent Ad Creatives + Direct CTA to 20-Min Midterm Error-Analysis Diagnostic",
-    marketTrigger: "Ontario Semester 1 Midterm Report Cards distributed this week",
-    courseCodesTargeted: ["MCR3U", "MPM2D"],
-    assignedAgentId: "agent-social",
-    skillName: "social-content",
-    targetPlatform: "Facebook",
-    funnelObjective: "Lead Generation",
-    targetKpi: "Generate 12+ booked parent diagnostics/day at CPL ≤ $26",
+      "10-Min Parent Debrief Call Script + Cognitive Report Objection Box + Kill Criteria Tracker",
+    marketTrigger:
+      "Current Diag Completed -> Paid is 21.4% (3/14); must reach >= 25% to unlock Stage 2",
+    courseCodesTargeted: ["MPM2D", "MCR3U", "MHF4U", "SBI3U"],
+    assignedAgentId: "agent-cro",
+    skillName: "cro",
+    targetPlatform: "Cognitive Report & Debrief Script",
+    funnelObjective: "Conversion Optimization",
+    targetKpi: "Lift Diag Completed -> Paid Conversion from 21.4% to >= 28%",
     status: "Queued",
+    requiredStage: "STAGE_1_CONVERSION",
   },
   {
     id: "act-daily-2",
     horizon: "Daily",
-    timeWindow: "Today · 01:30 PM EST",
-    title: "Ship 2-Step Course-Code Diagnostic Micro-Form on Homepage Hero",
+    timeWindow: "Today · Stage 1 Priority #2",
+    title:
+      "Trigger 72-Hour Post-Diagnostic Undecided Parent Close Sequence (Human Learning Manager Voice Note + 30-Day Guarantee)",
     tacticalExecution:
-      "Replace the 6-field generic contact form with a 2-step micro-commitment widget: Step 1 asks only 'Which Ontario Math course is your child taking? (Gr. 7–8 | Gr. 9 MTH1W | Gr. 10 MPM2D | Gr. 11 MCR3U | Gr. 12 MHF4U/MCV4U)'; Step 2 captures Parent Email & Mobile to unlock the instant calendar slot.",
+      "Send 3-touch email/SMS sequence to the 11 parents who completed diagnostics this week without enrolling on the call. Directly resolve VOC-103 ('If I still have to sit at the kitchen table nagging him to log in...') by showing the Friday Parent Accountability Scorecard.",
     deliverableSpec:
-      "High-Converting Hero Copy + 2-Step Course-Code Selector Microcopy & Anti-Cheating Trust Badge",
-    marketTrigger: "CRO audit showed 44% drop-off on multi-field parent intake forms",
-    courseCodesTargeted: ["MTH1W", "MPM2D", "MCR3U", "MHF4U", "MCV4U"],
-    assignedAgentId: "agent-cro",
-    skillName: "cro",
-    targetPlatform: "Landing Page",
-    funnelObjective: "Conversion Optimization",
-    targetKpi: "Lift Hero Visitor-to-Diagnostic completion rate from 4.4% to 7.1%",
-    status: "Queued",
-  },
-  {
-    id: "act-daily-3",
-    horizon: "Daily",
-    timeWindow: "Today · 04:30 PM EST",
-    title: "Trigger Same-Day Pre-Consult 'Socratic AI vs. ChatGPT' Proof Email for Tonight's Booked Parents",
-    tacticalExecution:
-      "Send automated pre-diagnostic email to all parents booked for evening consults showing a real 4-turn transcript of MindLC's Socratic AI guiding a Grade 10 student through factoring quadratics without handing over the answer.",
-    deliverableSpec:
-      "Pre-Diagnostic Parent Indoctrination Email + 4-Step Socratic Transcript Snippet",
-    marketTrigger: "Eliminate parent skepticism ('Is this just a ChatGPT wrapper?') before the Human Learning Manager call",
-    courseCodesTargeted: ["MPM2D", "MCR3U"],
+      "3-Touch Post-Diagnostic Follow-Up Sequence (Hours +2, +24, +72) with Single 1-Tap $139 CAD/mo Checkout CTA",
+    marketTrigger: "11 completed diagnostics sitting undecided from this week's cohort",
+    courseCodesTargeted: ["MCR3U", "MHF4U"],
     assignedAgentId: "agent-lifecycle",
     skillName: "copywriting",
     targetPlatform: "Email Sequence",
     funnelObjective: "Conversion Optimization",
-    targetKpi: "Maintain ≥ 86% evening diagnostic show-up rate",
+    targetKpi: "Convert >= 2 of 11 undecided diagnostic families within 72 hours",
     status: "Queued",
+    requiredStage: "STAGE_1_CONVERSION",
   },
-
-  // ==================== WEEKLY HORIZON ====================
   {
     id: "act-weekly-1",
     horizon: "Weekly",
-    timeWindow: "Week Sprint · Mon–Tue",
-    title: "Publish 'MindLC vs. Kumon & Mathnasium for Ontario High School Math' Comparison Pillar",
+    timeWindow: "Weekly Sprint · Stage 1 Conversion Audit",
+    title:
+      "Re-Design Page 1 of Student Cognitive Diagnostic Report to Highlight 'Homework vs. Closed-Book Test Gap'",
     tacticalExecution:
-      "Publish a comprehensive buyer comparison guide breaking down monthly cost ($350–$500/mo franchise centres vs. MindLC), winter driving time saved, and why elementary worksheet drills fail on Ontario Grade 9–12 Thinking/Application rubrics.",
+      "Add a red/green visual contrast box at the top of the PDF/web Cognitive Report comparing 'Homework Score with AI/Notes (92%)' vs. 'Unassisted Ontario Rubric Application Score (48%)'—followed immediately by the 30-Day Tier 2 Managed Hybrid prescription.",
     deliverableSpec:
-      "1,200-Word Competitor Comparison Article + 4-Row Feature Matrix + 'Switch Your Tutoring Receipt' CTA",
-    marketTrigger: "High parent churn from worksheet centres during Grade 9–11 transition",
-    courseCodesTargeted: ["MTH1W", "MPM2D", "MCR3U"],
-    assignedAgentId: "agent-intel",
-    skillName: "ai-seo",
-    targetPlatform: "Blog",
-    funnelObjective: "Lead Generation",
-    targetKpi: "Capture high-intent 'Mathnasium alternative Ontario' organic & AI search traffic",
-    status: "Queued",
-  },
-  {
-    id: "act-weekly-2",
-    horizon: "Weekly",
-    timeWindow: "Week Sprint · Wed–Thu",
-    title: "Deploy 50-Word AEO Citation Blocks for Grade 9 EQAO (MTH1W) & Grade 12 Calculus (MCV4U)",
-    tacticalExecution:
-      "Add question-headed H2 blocks and FAQPage JSON-LD schema to course pages so ChatGPT Search, Perplexity, and Google AI Overviews cite MindLC when Ontario parents ask 'What is the best math tutoring for Grade 9 EQAO or Grade 12 Calculus?'",
-    deliverableSpec:
-      "SEO Meta Tags + 52-Word Extractable AEO Answer Blocks + JSON-LD FAQ Schema",
-    marketTrigger: "AI Search referral growth (+81% parent usage of ChatGPT/Perplexity for tutor comparisons)",
-    courseCodesTargeted: ["MTH1W", "MCV4U"],
-    assignedAgentId: "agent-seo",
-    skillName: "ai-seo",
-    targetPlatform: "SEO Meta",
-    funnelObjective: "Lead Generation",
-    targetKpi: "Achieve top-3 AI citation share across 15 Ontario course-code prompts",
-    status: "Queued",
-  },
-  {
-    id: "act-weekly-3",
-    horizon: "Weekly",
-    timeWindow: "Week Sprint · Friday Review",
-    title: "Run 7-Sweeps Copy Edit on Unconverted Diagnostic Follow-Up Sequence",
-    tacticalExecution:
-      "Audit and rewrite the 7-day follow-up email flow for parents who completed a diagnostic call but haven't enrolled yet—injecting specific Human Learning Manager weekly report screenshots and a 14-day risk-free guarantee.",
-    deliverableSpec:
-      "3-Email Post-Consult Objection-Handling Drip (Price vs. $80/hr Tutor, Teen Motivation Guarantee)",
-    marketTrigger: "Recover the 58% of diagnostic parents who delay enrollment decisions by 3–7 days",
-    courseCodesTargeted: ["MTH1W", "MCR3U", "MHF4U"],
-    assignedAgentId: "agent-lifecycle",
-    skillName: "copy-editing",
-    targetPlatform: "Email Sequence",
+      "Cognitive Report Layout Copy + $139 CAD/mo vs. $380/mo Centre Value Stack Table",
+    marketTrigger: "Resolve VOC-101 & VOC-102 visually before the parent asks about price",
+    courseCodesTargeted: ["MPM2D", "MCR3U", "MHF4U", "SBI3U"],
+    assignedAgentId: "agent-cro",
+    skillName: "cro",
+    targetPlatform: "Cognitive Report & Debrief Script",
     funnelObjective: "Conversion Optimization",
-    targetKpi: "Recover 18%+ of undecided diagnostic families into paid plans",
+    targetKpi: "Achieve >= 25% same-call close rate across 15 diagnostic debriefs",
     status: "Queued",
+    requiredStage: "STAGE_1_CONVERSION",
   },
-
-  // ==================== MONTHLY HORIZON ====================
   {
     id: "act-monthly-1",
     horizon: "Monthly",
-    timeWindow: "Month 1 · Days 1–10",
-    title: "Launch Interactive 'Ontario Grade 9 EQAO & Grade 11 Functions Readiness Mini-Quiz' Lead Magnet",
+    timeWindow: "Month 1 · Stage 1 -> Stage 2 Transition Prep",
+    title:
+      "Prepare Week 4–6 'Unit-Test Win' Parent Referral Pass & GTA MCR3U/SBI3U Parent Seminar Kit (Unlocks at 26 Students)",
     tacticalExecution:
-      "Build a 5-question interactive parent/student diagnostic quiz aligned to Ontario Ministry curriculum expectations that grades their readiness in 3 minutes and books them straight into a Human Learning Manager review call.",
+      "Build the automated WhatsApp/SMS referral trigger for our first 25 paying families when their teen logs a +10% unit test improvement, arming each parent with 2 VIP Diagnostic Guest Passes.",
     deliverableSpec:
-      "Interactive Quiz Landing Page Copy + Instant Score Report Email Template",
-    marketTrigger: "Free interactive tools convert cold Ontario parent traffic at 2.4x higher rate than static PDFs",
-    courseCodesTargeted: ["MTH1W", "MCR3U"],
-    assignedAgentId: "agent-cro",
-    skillName: "cro",
-    targetPlatform: "Landing Page",
-    funnelObjective: "Lead Generation",
-    targetKpi: "320+ monthly quiz completions with 35%+ booking a live Learning Manager consult",
-    status: "Queued",
-  },
-  {
-    id: "act-monthly-2",
-    horizon: "Monthly",
-    timeWindow: "Month 1 · Days 11–20",
-    title: "Execute Ontario High School Guidance Department & Parent Council Workshop Campaign",
-    tacticalExecution:
-      "Run targeted outbound to 60 GTA & Ottawa secondary school parent councils offering a free 30-minute virtual parent workshop: 'How to Help Your Teen Master De-Streamed Grade 9–12 Math Without AI Cheating.'",
-    deliverableSpec:
-      "3-Touch School Council Outbound Email Sequence + Parent Workshop Registration Landing Page",
-    marketTrigger: "Direct B2B2C trust channel with zero Meta ad auction dependency",
-    courseCodesTargeted: ["MTH1W", "MPM2D", "MCR3U", "MHF4U"],
+      "Week 4–6 Parent Referral Invite Flow + 30-Min Ontario Parent Seminar Script",
+    marketTrigger: "Prepare zero-CAC Stage 2 referral engine as soon as Stage 1 hits 25 paid students",
+    courseCodesTargeted: ["MPM2D", "MCR3U", "MHF4U", "SBI3U"],
     assignedAgentId: "agent-lifecycle",
     skillName: "copywriting",
-    targetPlatform: "Email Sequence",
-    funnelObjective: "Lead Generation",
-    targetKpi: "Book 4+ school parent council workshops/month (25–40 parent leads per workshop)",
+    targetPlatform: "Parent Referral & Seminar Kit",
+    funnelObjective: "Parent Retention & Referral",
+    targetKpi: "Referral & Seminar -> Diagnostic Booked >= 40% in Stage 2",
     status: "Queued",
+    requiredStage: "STAGE_2_REFERRAL_DIAG",
   },
-
-  // ==================== QUARTERLY HORIZON ====================
   {
     id: "act-quarterly-1",
     horizon: "Quarterly",
-    timeWindow: "Q1 · Semester 1 Finals → Semester 2 Switch",
-    title: "Build Complete Programmatic Ontario Course-Code Hub (Gr. 7, Gr. 8, MTH1W, MPM2D, MCR3U, MHF4U, MCV4U, MDM4U)",
+    timeWindow: "90-Day Milestone · First 100 Paid Students ($13,900 CAD MRR)",
+    title:
+      "Stage-Gated Progression: 0–25 Conversion Lock -> 26–60 Referral & Seminar Lock -> 61–100 GTA Paid Ad Scale",
     tacticalExecution:
-      "Publish 8 dedicated curriculum hub pages—each featuring unit-by-unit Ontario Ministry expectations, sample Socratic AI hint dialogues, Human Learning Manager accountability workflows, and course-specific parent testimonials.",
+      "Enforce strict stage progression: do not spend cold ad budget in Stage 1 (0–25); scale referrals and MPM2D/MCR3U/MHF4U/SBI3U unit-test seminars in Stage 2 (26–60); unlock Mississauga/Oakville/Markham/Toronto Meta & Google ads in Stage 3 (61–100) with hard $150 CAD Blended CAC stop-loss.",
     deliverableSpec:
-      "8 Course-Code SEO & AEO Hub Pages + Internal Linking Architecture + Course Schema Markup",
-    marketTrigger: "Own every course-code search query in Ontario ahead of Semester 2 kickoff",
-    courseCodesTargeted: ["MTH1W", "MPM2D", "MCR3U", "MHF4U", "MCV4U", "MDM4U"],
-    assignedAgentId: "agent-seo",
-    skillName: "ai-seo",
-    targetPlatform: "SEO Meta",
-    funnelObjective: "Lead Generation",
-    targetKpi: "Grow organic non-paid diagnostic bookings to 45% of total pipeline",
+      "90-Day Stage-Gated Acquisition Playbook & Unit Economics Dashboard",
+    marketTrigger: "Path to 100 Tier 2 Managed Hybrid students ($139 CAD/month)",
+    courseCodesTargeted: ["MPM2D", "MCR3U", "MHF4U", "MCV4U", "SBI3U"],
+    assignedAgentId: "agent-intel",
+    skillName: "cro",
+    targetPlatform: "Cognitive Report & Debrief Script",
+    funnelObjective: "Conversion Optimization",
+    targetKpi: "100 Paid Students ($13,900 CAD MRR) with Blended CAC < $150 CAD",
     status: "Queued",
+    requiredStage: "STAGE_1_CONVERSION",
   },
   {
-    id: "act-quarterly-2",
-    horizon: "Quarterly",
-    timeWindow: "Q1 · Mid-Quarter",
-    title: "Launch 'Give 2 Weeks, Get $100 Tuition Credit' Ontario Parent Referral & Report-Card Win Loop",
+    id: "act-annual-1",
+    horizon: "Annual",
+    timeWindow: "Annual 4-Peak Ontario Academic Retention & Expansion Cycle",
+    title:
+      "Multi-Grade STEM Progression Engine (Grade 9 MTH1W -> Grade 10 MPM2D -> Grade 11 MCR3U/SBI3U -> Grade 12 MHF4U/MCV4U)",
     tacticalExecution:
-      "Trigger automated referral invitations to every MindLC parent the week their teen scores 85%+ on a unit test or improves their report card mark by 10%+—arming them with a shareable '2-Week Free Socratic AI + Human Manager Pass' for another Ontario family.",
+      "Transition active Tier 2 ($139 CAD/mo) students across semesters and summer bridge cohorts so a Grade 9/10 student remains enrolled through Grade 12 OUAC university admissions.",
     deliverableSpec:
-      "Parent Referral Invitation Sequence + Shareable Friend Landing Page",
-    marketTrigger: "Report-card week is the highest net-promoter moment in Ontario EdTech",
-    courseCodesTargeted: ["MTH1W", "MCR3U", "MHF4U"],
+      "Annual Semester-Bridge Retention & Sibling Referral Playbook",
+    marketTrigger: "Maximize LTV:CAC ratio across the 4-year Ontario secondary STEM lifecycle",
+    courseCodesTargeted: ["MTH1W", "MPM2D", "MCR3U", "MHF4U", "MCV4U", "SBI3U"],
     assignedAgentId: "agent-lifecycle",
     skillName: "copywriting",
     targetPlatform: "Email Sequence",
     funnelObjective: "Parent Retention & Referral",
-    targetKpi: "Generate 22%+ of new quarterly enrollments via parent-to-parent referrals (CAC < $40)",
+    targetKpi: "Average Student Retention >= 10.5 months (LTV >= $1,459 CAD on <$150 CAC)",
     status: "Queued",
-  },
-
-  // ==================== ANNUAL HORIZON ====================
-  {
-    id: "act-annual-1",
-    horizon: "Annual",
-    timeWindow: "Annual Cycle · 4 Ontario Academic Peaks",
-    title: "Execute Full-Year 4-Peak Ontario Academic Calendar Synchronization Engine",
-    tacticalExecution:
-      "Synchronize annual budget and multi-agent creative rotation across the 4 highest-converting Ontario windows: (Peak 1: Aug/Sep Back-to-School Foundation), (Peak 2: Nov/Apr Midterm Report Card Rescue), (Peak 3: Jan/Jun EQAO & Final Exam Blitz), and (Peak 4: Jul/Aug Summer Bridge to MCR3U & MHF4U).",
-    deliverableSpec:
-      "Annual 4-Peak Campaign Playbook + Budget Allocation Matrix + Summer Bridge Pre-Enrollment Offer",
-    marketTrigger: "Eliminate summer EdTech churn by transitioning Grade 9/10 students into July/August 'MCR3U Functions Head-Start' cohorts",
-    courseCodesTargeted: ["MTH1W", "MPM2D", "MCR3U", "MHF4U", "MCV4U"],
-    assignedAgentId: "agent-intel",
-    skillName: "cro",
-    targetPlatform: "Landing Page",
-    funnelObjective: "Parent Retention & Referral",
-    targetKpi: "Increase average student LTV from 4.5 months to 11.2+ months across Grade 7–12 progression",
-    status: "Queued",
+    requiredStage: "STAGE_1_CONVERSION",
   },
 ];
 
 const INITIAL_QA_HISTORY: PlanQaExchange[] = [
   {
     id: "qa-init-1",
-    timestamp: "Today · Auto-Brief",
+    timestamp: "Active Safeguard Brief",
     cmoQuestion:
-      "What is the highest-leverage market trigger in Ontario education right now, and how did you structure today's agent tasks around it?",
+      "Why are cold Meta ads and SEO blog clusters currently blocked in our workspace?",
     horizonAffected: "Daily",
     strategistAnswer:
-      "Right now, **Semester 1 Midterm Report Cards** across GTA boards (TDSB, YRDSB, PDSB, HDSB) and **Grade 9 De-Streamed MTH1W EQAO anxiety** are peaking simultaneously. Instead of running generic 'Math Tutoring' ads, I assigned **Agent-03 (Paid Social)** to target the 8-week window between midterms and January finals for `MCR3U` Functions, **Agent-04 (CRO)** to deploy a 2-step course-code diagnostic selector on the homepage, and **Agent-05 (Lifecycle)** to send a pre-consult 'Socratic AI vs. ChatGPT' proof email to tonight's booked parents.",
+      "Because we are currently at **14 / 100 paid students** ($1,946 CAD MRR on the $139 CAD/mo Tier 2 Managed Hybrid Plan), the **Single-Bottleneck Lock-In Engine** has locked the workspace to **`STAGE_1_CONVERSION`** (*Diagnostic Completed -> Paid Conversion >= 25%*). Our latest Weekly Reality Log shows 14 completed diagnostics and 3 paid conversions (**21.4%**). Until we lift that above **25%** using the *10-Minute Parent Debrief Script*, *Cognitive Report redesign*, and *30-Day Active-Habit Guarantee*, running cold ads or blog clusters would burn time and budget.",
     planAdjustmentsMade: [
-      "Prioritized [Daily] Agent-03 Task: GTA Midterm Report Card Rescue Ad Set (MCR3U)",
-      "Prioritized [Daily] Agent-04 Task: 2-Step Course-Code Diagnostic Micro-Form",
-      "Prioritized [Daily] Agent-05 Task: Pre-Consult Socratic AI Proof Email",
+      "Locked workspace to STAGE_1_CONVERSION (0–25 Paid Students)",
+      "Injected VoC quotes VOC-101..VOC-104 from WeeklyRealityLog into all proposals",
     ],
-  },
-];
-
-const INITIAL_CAMPAIGNS: Campaign[] = [
-  {
-    id: "camp-ontario-fall",
-    title: "Ontario Math Grades 7–12 — Fall Parent Enrollment",
-    status: "Approved",
-    created_at: "2026-10-15T14:00:00Z",
-  },
-  {
-    id: "camp-eqao-gr9",
-    title: "Grade 9 De-Streamed Math (MTH1W) & EQAO Readiness",
-    status: "Draft",
-    created_at: "2026-10-28T09:30:00Z",
-  },
-  {
-    id: "camp-gr11-functions",
-    title: "Grade 11/12 Functions & Calculus (MCR3U · MHF4U · MCV4U)",
-    status: "Draft",
-    created_at: "2026-11-02T11:15:00Z",
-  },
-];
-
-const INITIAL_ASSETS: Asset[] = [
-  {
-    id: "asset-hero-lp",
-    campaign_id: "camp-ontario-fall",
-    platform: "Landing Page",
-    title: "Hero & PAS Conversion Copy — Ontario Grades 7–12",
-    detail_level_used: 3,
-    skill_used: "copywriting",
-    agent_author: "Agent-04 · Funnel CRO",
-    updated_at: "10 mins ago",
-    content: `🎯 [ABOVE-THE-FOLD HERO SECTION]
-• Eyebrow: ONTARIO GRADES 7–12 MATH (MTH1W · MPM2D · MCR3U · MHF4U · MCV4U)
-• Headline (H1): Raise Your Teen’s Ontario Math Marks—Without Homework Battles or Passive $80/hr Tutoring.
-• Subheadline: MindLC pairs a dedicated Human Learning Manager for weekly accountability with 24/7 Socratic AI that guides your child through tough math steps without ever giving away the answer.
-• Primary CTA: Book Your Free Ontario Math Diagnostic & Parent Consult →
-
-💡 [WHY TRADITIONAL TUTORING & GENERIC AI BOTH FALL SHORT]
-1. The 1-Hour Tutor Trap: A weekly tutor explains a concept on Sunday, but when your teen hits a wall on Wednesday at 9:30 PM, they are on their own.
-2. The Chatbot Shortcut Trap: Standard AI tools hand over the final answer—destroying real comprehension before unit tests and EQAO.
-3. The MindLC Dual System: Weekly human accountability + 24/7 Socratic step-by-step hints.`,
-  },
-  {
-    id: "asset-fb-ad",
-    campaign_id: "camp-ontario-fall",
-    platform: "Facebook",
-    title: "Ontario Parent Scroll-Stopper — 9:45 PM Homework Hook",
-    detail_level_used: 2,
-    skill_used: "social-content",
-    agent_author: "Agent-03 · Paid Social",
-    updated_at: "25 mins ago",
-    content: `📣 [FACEBOOK / INSTAGRAM AD — ONTARIO PARENTS]
-
-It’s 9:45 PM on a Tuesday. Your teen has a Grade 11 Functions (MCR3U) unit test tomorrow morning—and they’re staring at a blank page.
-
-Traditional $75/hr tutors only show up once a week.
-Generic AI chatbots just hand over the final answer (so your child blanks out on the real test).
-
-That’s why Ontario families are switching to MindLC:
-✅ Dedicated Human Learning Manager for weekly study plans & accountability
-✅ 24/7 Socratic AI Math Coach for guided step-by-step homework hints (never gives away the answer!)
-
-👉 [CTA BUTTON]: Book Your Free Ontario Math Diagnostic →`,
-  },
-  {
-    id: "asset-seo-meta",
-    campaign_id: "camp-ontario-fall",
-    platform: "SEO Meta",
-    title: "AI-SEO & Google AI Overviews Citation Block",
-    detail_level_used: 3,
-    skill_used: "ai-seo",
-    agent_author: "Agent-02 · AI-SEO",
-    updated_at: "1 hr ago",
-    content: `🔍 [SEO META TAGS]
-• Title Tag (57 chars): Ontario Grades 7–12 Math Help | Human Coach + Socratic AI
-• Meta Description (155 chars): Boost Ontario Grades 7–12 math marks (EQAO, MCR3U, MHF4U). MindLC combines a Human Learning Manager for accountability with 24/7 Socratic AI guided hints.
-
-🤖 [AEO / LLM EXTRACTABLE ANSWER BLOCK (49 words)]
-## How does MindLC improve Ontario Grade 7–12 math grades?
-MindLC combines a dedicated **Human Learning Manager** (who sets weekly goals and tracks Ontario curriculum mastery across MTH1W, MCR3U, MHF4U, and MCV4U) with a **24/7 Socratic AI tutor** that guides students through math problems using step-by-step hints rather than giving away final answers.`,
   },
 ];
 
@@ -666,30 +707,33 @@ const INITIAL_CHAT: ChatMessage[] = [
     id: "msg-welcome",
     sender: "ai",
     timestamp: "Just now",
-    skillName: "copywriting",
+    skillName: "cro",
     detailLevel: 3,
-    linkedAssetId: "asset-hero-lp",
-    linkedPlatform: "Landing Page",
+    linkedAssetId: "asset-stage1-debrief",
+    linkedPlatform: "Cognitive Report & Debrief Script",
     strategicJustification: {
       detailLevel: 3,
       levelLabel: "Level 3: Deep Mentorship (The Why & How)",
       headlineSummary:
-        "Welcome to the MindLC Campaign Co-Pilot. Your initial Landing Page, Facebook Ad, and AI-SEO assets are loaded on the Left Canvas.",
+        "Conversion Safeguards & HITL State Machine Active (Goal: First 100 Paid Students @ $139 CAD/mo Tier 2 Managed Hybrid).",
       rationaleBody:
-        "1. **Dual-Pane Architecture:** Whenever you command me below (or dispatch an autonomous agent from the **CMO Planner & Agent Team** tab), pure marketing copy is injected straight into the **Left Asset Canvas**, while strategic rationale and mentorship stay here in the **Right Chat Feed**.\n2. **Try It Now:** Select a Marketing Skill from the dropdown below, choose Detail Level 1, 2, or 3, and ask me to generate or refine an asset for Ontario Grades 7–12 Math.",
+        "1. **Weekly Reality Gate (`UNLOCKED` — Week of 2026-11-16 Logged):** 4 verbatim Ontario parent quotes (`VOC-101`..`VOC-104`) and your live funnel rates (`21.4% Diag-to-Paid`) are context-cached into my system prompt. (Click **'Test Reality Gate Lock'** in the top bar to see how new generation locks when a weekly log is missing!).\n2. **Single-Bottleneck Lock-In (`STAGE_1_CONVERSION` at 14/100 Students):** I will strictly block out-of-scope requests (like cold Meta ads or SEO blogs) and warn you with bottleneck math unless you explicitly override.\n3. **Mandatory Proposal Schema & HITL Approval:** Every card on the Left Canvas includes **Cited VoC Quotes**, **Single CTA**, **Devil's Advocate Failure Hypothesis & Blind-Spot Question**, and **Kill Criteria Stop-Loss**.",
       frameworksApplied: [
-        "Mandatory Output Protocol",
-        "JTBD Four Forces",
-        "PAS Copywriting",
+        "Weekly Reality Gate (VoC Cache)",
+        "Single-Bottleneck Lock-In (Stage 1)",
+        "Mandatory Proposal Schema (Devil's Advocate + Kill Criteria)",
+        "HITL Approval State Machine",
       ],
       mentorshipTakeaway:
-        "Tip: Visit the 'CMO Planner & Agent Team' tab to review Daily, Weekly, Monthly, Quarterly, and Annual activities or dispatch your 5 specialist agents automatically.",
+        "Try typing 'Write a cold Facebook ad for GTA parents' below to see the Single-Bottleneck Scope-Drift Guardrail in action—or click 'Refine in Chat' on any Left Canvas card to revise it conversationally!",
+      contextCacheStatus:
+        "Context Cache HIT (4 VoC quotes + 21.4% Diag-to-Paid rate injected)",
     },
   },
 ];
 
 export const useMarketingStore = create<MarketingState>((set, get) => ({
-  activeTab: "planner",
+  activeTab: "copilot",
   currentUser: {
     id: "usr-admin-01",
     email: "founder@mindlc.ca",
@@ -699,26 +743,41 @@ export const useMarketingStore = create<MarketingState>((set, get) => ({
   campaigns: INITIAL_CAMPAIGNS,
   assets: INITIAL_ASSETS,
   activeCampaignId: "camp-ontario-fall",
-  selectedSkillId: "skill-copywriting",
+  selectedSkillId: "skill-cro",
   detailLevel: 3,
-  preferredPlatform: "Landing Page",
+  preferredPlatform: "Cognitive Report & Debrief Script",
   chatMessages: INITIAL_CHAT,
   isGenerating: false,
-  lastHighlightedAssetId: "asset-hero-lp",
+  lastHighlightedAssetId: "asset-stage1-debrief",
   brandPersona: {
     companyName: "MindLC",
+    planNameAndPrice: "Tier 2 Managed Hybrid Plan: $139 CAD/month",
     targetAudience:
-      "Ontario parents of students in Grades 7–12 (de-streamed Grade 9 MTH1W, Grade 10 MPM2D, Grade 11 Functions MCR3U, Grade 12 Advanced Functions MHF4U & Calculus MCV4U).",
+      "Ontario parents of students in Grades 9–12 STEM (MPM2D, MCR3U, MHF4U, MCV4U, SBI3U, SCH4U, SPH4U).",
     coreHook:
-      "Target: Ontario parents, Grades 7-12. Core hook: We use Human Learning Managers for accountability and Socratic AI for 24/7 guided math hints.",
+      "Target: First 100 paid Ontario Grades 9–12 STEM students ($139 CAD/month Tier 2 Managed Hybrid Plan). Core hook: Human Learning Managers for weekly accountability + 24/7 Socratic AI for guided step-by-step hints (never hands over the answer).",
     curriculumFocus:
-      "Ontario Ministry of Education Math Curriculum (Grades 7–8 Foundations, Grade 9 EQAO MTH1W, Grade 11 MCR3U, Grade 12 MHF4U & MCV4U).",
+      "Ontario Ministry of Education Grades 9–12 STEM (MTH1W, MPM2D, MCR3U, MHF4U, MCV4U, SBI3U).",
     brandVoice:
-      "Empathetic to parent homework stress, academically rigorous, encouraging, clear, anti-shortcut (Socratic mastery over answer-copying).",
+      "Direct, evidence-driven, empathetic to parent homework stress, anti-shortcut (Socratic mastery over ChatGPT answer-copying).",
     antiPersonaObjections:
-      "1. 'Won't my teen just use AI to cheat?' → No, Socratic AI is hard-coded never to give final answers, only guided hints. 2. 'My teen won't log in on their own.' → That's why every student has a dedicated Human Learning Manager for weekly accountability.",
-    geminiModel: "gemini-2.5-pro (Mandatory Output Protocol v1.0)",
+      "1. VOC-101 (ai_cheating): 'My son uses ChatGPT to finish homework in 5 mins and gets 58% on unit tests.' 2. VOC-102 (price): 'We burned $380/mo at Mathnasium—why won't he ignore this $139/mo subscription?' -> Answered via 30-Day Active-Habit Guarantee.",
+    geminiModel: "gemini-2.5-pro (HITL Safeguard Schema v2.0)",
   },
+
+  // Safeguard 1 Initial State
+  realityGateStatus: "UNLOCKED",
+  pilotWeek0Used: false,
+  weeklyRealityLogs: INITIAL_REALITY_LOGS,
+  isRealityGateModalOpen: false,
+
+  // Safeguard 2 Initial State (14 Paid Students -> STAGE_1_CONVERSION)
+  paidStudentCount: 14,
+  activeBottleneckStage: "STAGE_1_CONVERSION",
+  pendingScopeDriftCommand: null,
+
+  // Safeguard 3 & 4 Initial State
+  activeRevisionAssetId: null,
 
   ontarioTrends: INITIAL_ONTARIO_TRENDS,
   competitors: INITIAL_COMPETITORS,
@@ -736,225 +795,173 @@ export const useMarketingStore = create<MarketingState>((set, get) => ({
   setDetailLevel: (level) => set({ detailLevel: level }),
   setPreferredPlatform: (platform) => set({ preferredPlatform: platform }),
   setActiveHorizon: (horizon) => set({ activeHorizon: horizon }),
+  setActiveRevisionAssetId: (assetId) =>
+    set({ activeRevisionAssetId: assetId }),
 
-  addScannedCompetitor: (comp) =>
+  setRealityGateModalOpen: (open) => set({ isRealityGateModalOpen: open }),
+
+  toggleRealityGateLockSimulation: () =>
     set((state) => ({
-      competitors: [comp, ...state.competitors],
+      realityGateStatus:
+        state.realityGateStatus === "LOCKED" ? "UNLOCKED" : "LOCKED",
     })),
 
-  spawnCounterActivityFromCompetitor: async (compId: string) => {
-    const state = get();
-    const comp = state.competitors.find((c) => c.id === compId);
-    if (!comp) return;
+  submitWeeklyRealityLog: (payload) =>
+    set((state) => {
+      const formattedQuotes: VerbatimParentQuote[] =
+        payload.verbatim_parent_quotes.map((q, idx) => ({
+          id: `VOC-${105 + state.weeklyRealityLogs.length * 2 + idx}`,
+          quote_text: q.quote_text.trim(),
+          context_tag: q.context_tag,
+          week_start_date: payload.week_start_date,
+        }));
 
-    const newActivity: PlannedActivity = {
-      id: `act-comp-${Date.now()}`,
-      horizon: "Daily",
-      timeWindow: "Today · Urgent Counter-Play",
-      title: `Counter-Position Against ${comp.name}: "${comp.recommendedConversionPlay.slice(0, 65)}"`,
-      tacticalExecution: `Target Ontario parents comparing ${comp.name} (${comp.pricingModel}) against MindLC. Highlight their structural weakness (${comp.structuralWeakness}) and present MindLC's wedge: ${comp.mindlcCounterWedge}`,
-      deliverableSpec: `Comparison Battlecard & High-Converting Ad/Landing Section vs. ${comp.name}`,
-      marketTrigger: `Competitor gap identified in ${comp.name}`,
-      courseCodesTargeted: ["MTH1W", "MCR3U", "MHF4U", "MCV4U"],
-      assignedAgentId: "agent-seo",
-      skillName: "ai-seo",
-      targetPlatform: "Blog",
-      funnelObjective: "Conversion Optimization",
-      targetKpi: "Capture comparison traffic and convert ≥ 25% to Free Diagnostic",
-      status: "Queued",
-      adjustedByCmo: true,
-      cmoAdjustmentNote: `Spawned from Competitor Intel Matrix (${comp.name})`,
+      const newLog: WeeklyRealityLog = {
+        id: `wrl-${Date.now()}`,
+        week_start_date: payload.week_start_date,
+        funnel_metrics: payload.funnel_metrics,
+        verbatim_parent_quotes: formattedQuotes,
+        top_winning_touchpoint: payload.top_winning_touchpoint.trim(),
+        created_at: new Date().toISOString(),
+      };
+
+      const newPaidTotal = Math.min(
+        100,
+        Math.max(0, payload.funnel_metrics.paid_conversions)
+      );
+
+      return {
+        weeklyRealityLogs: [newLog, ...state.weeklyRealityLogs],
+        realityGateStatus: "UNLOCKED",
+        isRealityGateModalOpen: false,
+        paidStudentCount:
+          newPaidTotal > 0 ? newPaidTotal : state.paidStudentCount,
+        activeBottleneckStage: getBottleneckStageForStudents(
+          newPaidTotal > 0 ? newPaidTotal : state.paidStudentCount
+        ),
+      };
+    }),
+
+  activatePilotWeek0Override: () =>
+    set((state) => {
+      if (state.pilotWeek0Used) return state;
+      return {
+        realityGateStatus: "PILOT_WEEK_0_OVERRIDE",
+        pilotWeek0Used: true,
+        isRealityGateModalOpen: false,
+      };
+    }),
+
+  setPaidStudentCount: (count) => {
+    const clamped = Math.max(0, Math.min(100, count));
+    const stage = getBottleneckStageForStudents(clamped);
+    const defaultPlatformForStage: Record<
+      ActiveBottleneckStage,
+      AssetPlatform
+    > = {
+      STAGE_1_CONVERSION: "Cognitive Report & Debrief Script",
+      STAGE_2_REFERRAL_DIAG: "Parent Referral & Seminar Kit",
+      STAGE_3_SCALE_ADS: "Facebook",
     };
-
-    set((prev) => ({
-      plannedActivities: [newActivity, ...prev.plannedActivities],
-      activeHorizon: "Daily",
-      activeTab: "planner",
-    }));
-
-    await get().dispatchAgentForActivity(newActivity.id);
-  },
-
-  spawnActivityFromTrend: async (trendId: string) => {
-    const state = get();
-    const trend = state.ontarioTrends.find((t) => t.id === trendId);
-    if (!trend) return;
-
-    const newActivity: PlannedActivity = {
-      id: `act-trend-${Date.now()}`,
-      horizon: "Daily",
-      timeWindow: "Today · Market Signal Trigger",
-      title: `Rapid Response: ${trend.title}`,
-      tacticalExecution: `${trend.recommendedCmoAction} Address parent pain directly: "${trend.parentPainSummary}"`,
-      deliverableSpec: `Rapid-Response Campaign Asset for ${trend.courseCodes.join(" · ")}`,
-      marketTrigger: `${trend.category} (${trend.searchMomentum})`,
-      courseCodesTargeted: trend.courseCodes,
-      assignedAgentId: trend.recommendedAgentId,
-      skillName:
-        trend.recommendedAgentId === "agent-social"
-          ? "social-content"
-          : trend.recommendedAgentId === "agent-seo"
-          ? "ai-seo"
-          : "cro",
-      targetPlatform:
-        trend.recommendedAgentId === "agent-social"
-          ? "Facebook"
-          : trend.recommendedAgentId === "agent-seo"
-          ? "SEO Meta"
-          : "Landing Page",
-      funnelObjective: "Lead Generation",
-      targetKpi: "Capitalize on Ontario search surge within 24 hours",
-      status: "Queued",
-      adjustedByCmo: true,
-      cmoAdjustmentNote: `Triggered from Ontario Education Signal: ${trend.title.slice(0, 48)}`,
-    };
-
-    set((prev) => ({
-      plannedActivities: [newActivity, ...prev.plannedActivities],
-      activeHorizon: "Daily",
-      activeTab: "planner",
-    }));
-
-    await get().dispatchAgentForActivity(newActivity.id);
-  },
-
-  dispatchAgentForActivity: async (activityId: string) => {
-    const state = get();
-    const activity = state.plannedActivities.find((a) => a.id === activityId);
-    if (!activity) return;
-
-    const agent =
-      state.agents.find((ag) => ag.id === activity.assignedAgentId) ||
-      state.agents[0];
-
-    set((prev) => ({
-      runningActivityId: activityId,
-      agents: prev.agents.map((ag) =>
-        ag.id === agent.id ? { ...ag, status: "Executing Task" } : ag
-      ),
-    }));
-
-    const result = await executeAutonomousAgentTask({
-      activity,
-      agent,
-      brandPersona: state.brandPersona,
+    set({
+      paidStudentCount: clamped,
+      activeBottleneckStage: stage,
+      preferredPlatform: defaultPlatformForStage[stage],
+      pendingScopeDriftCommand: null,
     });
-
-    const newAssetId = `asset-agent-${Date.now()}`;
-    const newAsset: Asset = {
-      id: newAssetId,
-      campaign_id: state.activeCampaignId,
-      platform: result.platform,
-      title: result.assetTitle,
-      content: result.content,
-      detail_level_used: 3,
-      skill_used: activity.skillName,
-      agent_author: agent.codeName,
-      updated_at: "Generated by " + agent.codeName,
-    };
-
-    const aiMsg: ChatMessage = {
-      id: `msg-agent-${Date.now()}`,
-      sender: "ai",
-      timestamp: new Date().toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-      skillName: activity.skillName,
-      detailLevel: 3,
-      linkedAssetId: newAssetId,
-      linkedPlatform: result.platform,
-      strategicJustification: {
-        detailLevel: 3,
-        levelLabel: "Level 3: Deep Mentorship (The Why & How)",
-        headlineSummary: `[Autonomous Agent Execution] ${result.agentReport}`,
-        rationaleBody: `• **Horizon & Trigger:** ${activity.horizon} Plan (${activity.timeWindow}) — ${activity.marketTrigger}\n• **Tactical Execution:** ${activity.tacticalExecution}\n• **Target Conversion KPI:** ${activity.targetKpi}`,
-        frameworksApplied: [
-          agent.codeName,
-          activity.skillName,
-          activity.funnelObjective,
-        ],
-        mentorshipTakeaway: `This deliverable has been added to your Left Asset Canvas under "${result.assetTitle}".`,
-      },
-    };
-
-    set((prev) => ({
-      runningActivityId: null,
-      assets: [newAsset, ...prev.assets],
-      chatMessages: [...prev.chatMessages, aiMsg],
-      lastHighlightedAssetId: newAssetId,
-      plannedActivities: prev.plannedActivities.map((a) =>
-        a.id === activityId
-          ? { ...a, status: "Completed", outputAssetId: newAssetId }
-          : a
-      ),
-      agents: prev.agents.map((ag) =>
-        ag.id === agent.id
-          ? {
-              ...ag,
-              status: "Completed Sprint",
-              tasksCompletedCount: ag.tasksCompletedCount + 1,
-            }
-          : ag
-      ),
-    }));
   },
 
-  runAutonomousTeamSprint: async (horizon: PlanHorizon) => {
+  sendCopilotCommand: async (
+    userCommand: string,
+    explicitStageOverride = false
+  ) => {
     const state = get();
-    const queued = state.plannedActivities.filter(
-      (a) => a.horizon === horizon && a.status === "Queued"
-    );
-    if (queued.length === 0) return;
+    const isRevisingExisting = Boolean(state.activeRevisionAssetId);
 
-    set({ isRunningTeamSprint: true });
-    for (const act of queued) {
-      await get().dispatchAgentForActivity(act.id);
+    // =========================================================================
+    // SAFEGUARD 1 ENFORCEMENT: WEEKLY REALITY GATE
+    // Block `generateNewProposal()` when LOCKED, but ALLOW conversational
+    // refinement of existing proposals!
+    // =========================================================================
+    if (!isRevisingExisting && state.realityGateStatus === "LOCKED") {
+      set({ isRealityGateModalOpen: true });
+      const gateMsg: ChatMessage = {
+        id: `msg-gate-${Date.now()}`,
+        sender: "guardrail",
+        timestamp: new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+        skillName: "RealityGate",
+        detailLevel: state.detailLevel,
+        userPrompt: userCommand,
+        strategicJustification: {
+          detailLevel: state.detailLevel,
+          levelLabel: "Level 1: Executive Summary (Fast)",
+          headlineSummary:
+            "🔒 WEEKLY REALITY GATE LOCKED — New Proposal Generation Blocked",
+          rationaleBody:
+            "No WeeklyRealityLog is active for the current 7-day cycle. Submit the 60-second Weekly Reality Check (funnel metrics + 2 verbatim parent quotes) or use the one-time 'Pilot Week 0 Bootstrap' override to unlock new generation. Note: You CAN still refine existing proposals on the Left Canvas by clicking 'Refine in Chat' on any card.",
+          frameworksApplied: ["Safeguard 1: Weekly Reality Gate"],
+        },
+      };
+      set((prev) => ({ chatMessages: [...prev.chatMessages, gateMsg] }));
+      return;
     }
-    set({ isRunningTeamSprint: false });
-  },
 
-  askCmoPlannerQuestion: async (question: string) => {
-    const state = get();
-    set({ isAskingPlannerQa: true });
+    const latestLog = state.weeklyRealityLogs[0] || INITIAL_REALITY_LOGS[0];
+    const allVocQuotes = state.weeklyRealityLogs
+      .flatMap((l) => l.verbatim_parent_quotes)
+      .slice(0, 10);
 
-    const res = await evaluateCmoPlanQuestionAndAdjust({
-      question,
-      activeHorizon: state.activeHorizon,
-      trends: state.ontarioTrends,
-      competitors: state.competitors,
-      brandPersona: state.brandPersona,
-    });
+    // =========================================================================
+    // SAFEGUARD 2 ENFORCEMENT: SINGLE-BOTTLENECK LOCK-IN ENGINE
+    // Check if the Acting CMO requested an out-of-scope proposal
+    // =========================================================================
+    if (!isRevisingExisting && !explicitStageOverride) {
+      const drift = checkBottleneckScopeDrift({
+        userCommand,
+        preferredPlatform: state.preferredPlatform,
+        activeStage: state.activeBottleneckStage,
+        paidStudents: state.paidStudentCount,
+        funnelMetrics: latestLog.funnel_metrics,
+      });
 
-    const newExchange: PlanQaExchange = {
-      id: `qa-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-      cmoQuestion: question,
-      horizonAffected: res.horizonAffected,
-      strategistAnswer: res.strategistAnswer,
-      planAdjustmentsMade: res.adjustmentSummary,
-    };
+      if (drift.detected) {
+        const userMsg: ChatMessage = {
+          id: `msg-user-${Date.now()}`,
+          sender: "user",
+          timestamp: new Date().toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+          skillName:
+            state.skills.find((s) => s.id === state.selectedSkillId)
+              ?.skill_name || "cro",
+          detailLevel: state.detailLevel,
+          userPrompt: userCommand,
+        };
 
-    set((prev) => ({
-      isAskingPlannerQa: false,
-      activeHorizon: res.horizonAffected,
-      plannedActivities: [...res.newActivities, ...prev.plannedActivities],
-      planQaHistory: [newExchange, ...prev.planQaHistory],
-    }));
-  },
+        const driftMsg: ChatMessage = {
+          id: `msg-drift-${Date.now() + 1}`,
+          sender: "guardrail",
+          timestamp: new Date().toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+          skillName: "BottleneckGuardrail",
+          detailLevel: state.detailLevel,
+          scopeDriftWarning: drift,
+        };
 
-  reassignActivityAgent: (activityId, newAgentId) =>
-    set((state) => ({
-      plannedActivities: state.plannedActivities.map((a) =>
-        a.id === activityId ? { ...a, assignedAgentId: newAgentId } : a
-      ),
-    })),
+        set((prev) => ({
+          chatMessages: [...prev.chatMessages, userMsg, driftMsg],
+          pendingScopeDriftCommand: userCommand,
+        }));
+        return;
+      }
+    }
 
-  sendCopilotCommand: async (userCommand: string) => {
-    const state = get();
     const skill =
       state.skills.find((s) => s.id === state.selectedSkillId) ||
       state.skills[0];
@@ -963,18 +970,28 @@ export const useMarketingStore = create<MarketingState>((set, get) => ({
       minute: "2-digit",
     });
 
+    const targetAssetForRevision = state.activeRevisionAssetId
+      ? state.assets.find((a) => a.id === state.activeRevisionAssetId)
+      : undefined;
+
     const userMsg: ChatMessage = {
       id: `msg-user-${Date.now()}`,
       sender: "user",
       timestamp: nowTime,
       skillName: skill.skill_name,
       detailLevel: state.detailLevel,
-      userPrompt: userCommand,
+      userPrompt: targetAssetForRevision
+        ? `[Refining Proposal: ${targetAssetForRevision.proposal_schema?.proposal_id || targetAssetForRevision.title}] ${userCommand}`
+        : explicitStageOverride
+        ? `[CMO Stage Override Confirmed] ${userCommand}`
+        : userCommand,
+      isRevisionTurn: Boolean(targetAssetForRevision),
     };
 
     set({
       chatMessages: [...state.chatMessages, userMsg],
       isGenerating: true,
+      pendingScopeDriftCommand: null,
     });
 
     const response = await generateMarketingResponse({
@@ -982,9 +999,55 @@ export const useMarketingStore = create<MarketingState>((set, get) => ({
       selectedSkill: skill,
       detailLevel: state.detailLevel,
       brandPersona: state.brandPersona,
-      preferredPlatform: state.preferredPlatform,
+      preferredPlatform: targetAssetForRevision
+        ? targetAssetForRevision.platform
+        : state.preferredPlatform,
+      activeStage: state.activeBottleneckStage,
+      vocQuotes: allVocQuotes,
+      funnelMetrics: latestLog.funnel_metrics,
+      existingProposalToRevise: targetAssetForRevision?.proposal_schema,
     });
 
+    if (targetAssetForRevision) {
+      // Update existing proposal in place and reset HITL state to DRAFT for re-verification
+      const aiMsg: ChatMessage = {
+        id: `msg-ai-${Date.now() + 1}`,
+        sender: "ai",
+        timestamp: new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+        skillName: skill.skill_name,
+        detailLevel: state.detailLevel,
+        strategicJustification: response.strategicJustification,
+        linkedAssetId: targetAssetForRevision.id,
+        linkedPlatform: targetAssetForRevision.platform,
+        isRevisionTurn: true,
+      };
+
+      set((prev) => ({
+        assets: prev.assets.map((a) =>
+          a.id === targetAssetForRevision.id
+            ? {
+                ...a,
+                content: response.marketingContent,
+                proposal_schema: response.proposalSchema,
+                hitl_state: "DRAFT",
+                devils_advocate_verified: false,
+                kill_criteria_acknowledged: false,
+                revision_count: (a.revision_count || 1) + 1,
+                updated_at: "Revised via CMO Chat just now",
+              }
+            : a
+        ),
+        chatMessages: [...prev.chatMessages, aiMsg],
+        isGenerating: false,
+        lastHighlightedAssetId: targetAssetForRevision.id,
+      }));
+      return;
+    }
+
+    // Create new schema-validated Proposal Card on Left Canvas
     const newAssetId = `asset-${Date.now()}`;
     const newAsset: Asset = {
       id: newAssetId,
@@ -995,6 +1058,11 @@ export const useMarketingStore = create<MarketingState>((set, get) => ({
       detail_level_used: state.detailLevel,
       skill_used: skill.skill_name,
       updated_at: "Just now",
+      proposal_schema: response.proposalSchema,
+      hitl_state: "DRAFT",
+      devils_advocate_verified: false,
+      kill_criteria_acknowledged: false,
+      revision_count: 1,
     };
 
     if (isSupabaseConfigured && supabase) {
@@ -1031,6 +1099,265 @@ export const useMarketingStore = create<MarketingState>((set, get) => ({
     }));
   },
 
+  toggleProposalVerification: (assetId, field) =>
+    set((state) => ({
+      assets: state.assets.map((a) =>
+        a.id === assetId ? { ...a, [field]: !a[field] } : a
+      ),
+    })),
+
+  transitionProposalHitlState: (assetId, nextState) =>
+    set((state) => ({
+      assets: state.assets.map((a) =>
+        a.id === assetId
+          ? {
+              ...a,
+              hitl_state: nextState,
+              updated_at: `HITL -> ${nextState} (${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })})`,
+            }
+          : a
+      ),
+    })),
+
+  addScannedCompetitor: (comp) =>
+    set((state) => ({
+      competitors: [comp, ...state.competitors],
+    })),
+
+  spawnCounterActivityFromCompetitor: async (compId: string) => {
+    const state = get();
+    if (state.realityGateStatus === "LOCKED") {
+      set({ isRealityGateModalOpen: true });
+      return;
+    }
+    const comp = state.competitors.find((c) => c.id === compId);
+    if (!comp) return;
+
+    const newActivity: PlannedActivity = {
+      id: `act-comp-${Date.now()}`,
+      horizon: "Daily",
+      timeWindow: `Today · ${state.activeBottleneckStage} Counter-Play`,
+      title: `Counter-Position Against ${comp.name}: "${comp.recommendedConversionPlay.slice(0, 65)}"`,
+      tacticalExecution: `Target Ontario parents comparing ${comp.name} (${comp.pricingModel}) against MindLC ($139 CAD/mo Tier 2 Managed Hybrid). Highlight their structural weakness (${comp.structuralWeakness}) and present MindLC's wedge: ${comp.mindlcCounterWedge}`,
+      deliverableSpec: `Comparison Battlecard & Debrief Objection Script vs. ${comp.name}`,
+      marketTrigger: `Competitor gap identified in ${comp.name}`,
+      courseCodesTargeted: ["MPM2D", "MCR3U", "MHF4U", "SBI3U"],
+      assignedAgentId: "agent-cro",
+      skillName: "cro",
+      targetPlatform: "Cognitive Report & Debrief Script",
+      funnelObjective: "Conversion Optimization",
+      targetKpi: "Lift Diag Completed -> Paid Conversion >= 25%",
+      status: "Queued",
+      adjustedByCmo: true,
+      cmoAdjustmentNote: `Spawned from Competitor Intel Matrix (${comp.name})`,
+      requiredStage: state.activeBottleneckStage,
+    };
+
+    set((prev) => ({
+      plannedActivities: [newActivity, ...prev.plannedActivities],
+      activeHorizon: "Daily",
+      activeTab: "planner",
+    }));
+
+    await get().dispatchAgentForActivity(newActivity.id);
+  },
+
+  spawnActivityFromTrend: async (trendId: string) => {
+    const state = get();
+    if (state.realityGateStatus === "LOCKED") {
+      set({ isRealityGateModalOpen: true });
+      return;
+    }
+    const trend = state.ontarioTrends.find((t) => t.id === trendId);
+    if (!trend) return;
+
+    const newActivity: PlannedActivity = {
+      id: `act-trend-${Date.now()}`,
+      horizon: "Daily",
+      timeWindow: `Today · ${state.activeBottleneckStage} Signal Trigger`,
+      title: `Rapid Response (${state.activeBottleneckStage}): ${trend.title}`,
+      tacticalExecution: `${trend.recommendedCmoAction} Address parent pain directly: "${trend.parentPainSummary}"`,
+      deliverableSpec: `Stage-Aligned Proposal for ${trend.courseCodes.join(" · ")}`,
+      marketTrigger: `${trend.category} (${trend.searchMomentum})`,
+      courseCodesTargeted: trend.courseCodes,
+      assignedAgentId: "agent-cro",
+      skillName: "cro",
+      targetPlatform: "Cognitive Report & Debrief Script",
+      funnelObjective: "Conversion Optimization",
+      targetKpi: "Diag Completed -> Paid >= 25% ($139 CAD/mo Tier 2)",
+      status: "Queued",
+      adjustedByCmo: true,
+      cmoAdjustmentNote: `Triggered from Ontario Signal: ${trend.title.slice(0, 48)}`,
+      requiredStage: state.activeBottleneckStage,
+    };
+
+    set((prev) => ({
+      plannedActivities: [newActivity, ...prev.plannedActivities],
+      activeHorizon: "Daily",
+      activeTab: "planner",
+    }));
+
+    await get().dispatchAgentForActivity(newActivity.id);
+  },
+
+  dispatchAgentForActivity: async (activityId: string) => {
+    const state = get();
+    if (state.realityGateStatus === "LOCKED") {
+      set({ isRealityGateModalOpen: true });
+      return;
+    }
+    const activity = state.plannedActivities.find((a) => a.id === activityId);
+    if (!activity) return;
+
+    const agent =
+      state.agents.find((ag) => ag.id === activity.assignedAgentId) ||
+      state.agents[0];
+    const latestLog = state.weeklyRealityLogs[0] || INITIAL_REALITY_LOGS[0];
+    const allVocQuotes = state.weeklyRealityLogs
+      .flatMap((l) => l.verbatim_parent_quotes)
+      .slice(0, 10);
+
+    set((prev) => ({
+      runningActivityId: activityId,
+      agents: prev.agents.map((ag) =>
+        ag.id === agent.id ? { ...ag, status: "Executing Task" } : ag
+      ),
+    }));
+
+    const result = await executeAutonomousAgentTask({
+      activity,
+      agent,
+      brandPersona: state.brandPersona,
+      activeStage: state.activeBottleneckStage,
+      vocQuotes: allVocQuotes,
+      funnelMetrics: latestLog.funnel_metrics,
+    });
+
+    const newAssetId = `asset-agent-${Date.now()}`;
+    const newAsset: Asset = {
+      id: newAssetId,
+      campaign_id: state.activeCampaignId,
+      platform: result.platform,
+      title: result.assetTitle,
+      content: result.content,
+      detail_level_used: 3,
+      skill_used: activity.skillName,
+      agent_author: agent.codeName,
+      updated_at: "Generated by " + agent.codeName,
+      proposal_schema: result.proposalSchema,
+      hitl_state: "DRAFT",
+      devils_advocate_verified: false,
+      kill_criteria_acknowledged: false,
+      revision_count: 1,
+    };
+
+    const aiMsg: ChatMessage = {
+      id: `msg-agent-${Date.now()}`,
+      sender: "ai",
+      timestamp: new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+      skillName: activity.skillName,
+      detailLevel: 3,
+      linkedAssetId: newAssetId,
+      linkedPlatform: result.platform,
+      strategicJustification: {
+        detailLevel: 3,
+        levelLabel: "Level 3: Deep Mentorship (The Why & How)",
+        headlineSummary: `[Autonomous Agent Proposal Drafted] ${result.agentReport}`,
+        rationaleBody: `• **Bottleneck Stage Lock:** ${state.activeBottleneckStage}\n• **Cited VoC Quotes:** ${result.proposalSchema.cited_voc_quotes.join(" ; ")}\n• **Devil's Advocate Risk:** ${result.proposalSchema.devils_advocate.primary_failure_hypothesis}\n• **Kill Criteria:** ${result.proposalSchema.kill_criteria.sample_threshold} -> ${result.proposalSchema.kill_criteria.stop_loss_metric}`,
+        frameworksApplied: [
+          agent.codeName,
+          state.activeBottleneckStage,
+          "Mandatory Proposal Schema",
+        ],
+        mentorshipTakeaway: `Review Devil's Advocate & Kill Criteria on the Left Canvas to transition "${result.assetTitle}" from DRAFT to APPROVED_FOR_EXECUTION.`,
+        contextCacheStatus: `Context Cache HIT (${allVocQuotes.length} VoC quotes injected)`,
+      },
+    };
+
+    set((prev) => ({
+      runningActivityId: null,
+      assets: [newAsset, ...prev.assets],
+      chatMessages: [...prev.chatMessages, aiMsg],
+      lastHighlightedAssetId: newAssetId,
+      plannedActivities: prev.plannedActivities.map((a) =>
+        a.id === activityId
+          ? { ...a, status: "Completed", outputAssetId: newAssetId }
+          : a
+      ),
+      agents: prev.agents.map((ag) =>
+        ag.id === agent.id
+          ? {
+              ...ag,
+              status: "Completed Sprint",
+              tasksCompletedCount: ag.tasksCompletedCount + 1,
+            }
+          : ag
+      ),
+    }));
+  },
+
+  runAutonomousTeamSprint: async (horizon: PlanHorizon) => {
+    const state = get();
+    if (state.realityGateStatus === "LOCKED") {
+      set({ isRealityGateModalOpen: true });
+      return;
+    }
+    const queued = state.plannedActivities.filter(
+      (a) => a.horizon === horizon && a.status === "Queued"
+    );
+    if (queued.length === 0) return;
+
+    set({ isRunningTeamSprint: true });
+    for (const act of queued) {
+      await get().dispatchAgentForActivity(act.id);
+    }
+    set({ isRunningTeamSprint: false });
+  },
+
+  askCmoPlannerQuestion: async (question: string) => {
+    const state = get();
+    set({ isAskingPlannerQa: true });
+
+    const res = await evaluateCmoPlanQuestionAndAdjust({
+      question,
+      activeHorizon: state.activeHorizon,
+      trends: state.ontarioTrends,
+      competitors: state.competitors,
+      brandPersona: state.brandPersona,
+      activeStage: state.activeBottleneckStage,
+      paidStudents: state.paidStudentCount,
+    });
+
+    const newExchange: PlanQaExchange = {
+      id: `qa-${Date.now()}`,
+      timestamp: new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+      cmoQuestion: question,
+      horizonAffected: res.horizonAffected,
+      strategistAnswer: res.strategistAnswer,
+      planAdjustmentsMade: res.adjustmentSummary,
+    };
+
+    set((prev) => ({
+      isAskingPlannerQa: false,
+      activeHorizon: res.horizonAffected,
+      plannedActivities: [...res.newActivities, ...prev.plannedActivities],
+      planQaHistory: [newExchange, ...prev.planQaHistory],
+    }));
+  },
+
+  reassignActivityAgent: (activityId, newAgentId) =>
+    set((state) => ({
+      plannedActivities: state.plannedActivities.map((a) =>
+        a.id === activityId ? { ...a, assignedAgentId: newAgentId } : a
+      ),
+    })),
+
   updateAssetContent: (assetId, newContent, newTitle) =>
     set((state) => ({
       assets: state.assets.map((a) =>
@@ -1039,7 +1366,17 @@ export const useMarketingStore = create<MarketingState>((set, get) => ({
               ...a,
               content: newContent,
               title: newTitle !== undefined ? newTitle : a.title,
-              updated_at: "Edited just now",
+              proposal_schema: a.proposal_schema
+                ? {
+                    ...a.proposal_schema,
+                    asset_body: newContent,
+                    title:
+                      newTitle !== undefined
+                        ? newTitle
+                        : a.proposal_schema.title,
+                  }
+                : undefined,
+              updated_at: "Edited manually just now",
             }
           : a
       ),
@@ -1048,20 +1385,63 @@ export const useMarketingStore = create<MarketingState>((set, get) => ({
   deleteAsset: (assetId) =>
     set((state) => ({
       assets: state.assets.filter((a) => a.id !== assetId),
+      activeRevisionAssetId:
+        state.activeRevisionAssetId === assetId
+          ? null
+          : state.activeRevisionAssetId,
     })),
 
   createManualAsset: (platform, title, content) =>
     set((state) => {
       const id = `asset-${Date.now()}`;
+      const latestLog = state.weeklyRealityLogs[0] || INITIAL_REALITY_LOGS[0];
+      const firstQuote = latestLog.verbatim_parent_quotes[0];
       const created: Asset = {
         id,
         campaign_id: state.activeCampaignId,
         platform,
-        title: title || `${platform} Draft`,
+        title: title || `${platform} Proposal`,
         content,
         detail_level_used: state.detailLevel,
         skill_used: "manual",
         updated_at: "Just now",
+        hitl_state: "DRAFT",
+        devils_advocate_verified: false,
+        kill_criteria_acknowledged: false,
+        revision_count: 1,
+        proposal_schema: {
+          proposal_id: `PROP-MAN-${Date.now().toString().slice(-4)}`,
+          title: title || `${platform} Proposal`,
+          bottleneck_stage: state.activeBottleneckStage,
+          channel: platform,
+          target_metric:
+            state.activeBottleneckStage === "STAGE_1_CONVERSION"
+              ? "Diagnostic Completed -> Paid Conversion >= 25%"
+              : state.activeBottleneckStage === "STAGE_2_REFERRAL_DIAG"
+              ? "Referral & Seminar -> Diagnostic Booked >= 40%"
+              : "GTA Paid Ad Blended CAC < $150 CAD",
+          cited_voc_quotes: [
+            firstQuote
+              ? `[${firstQuote.id} · ${firstQuote.context_tag}] "${firstQuote.quote_text}"`
+              : '[VOC-101 · ai_cheating] "My son uses ChatGPT to finish homework in 5 mins and gets 58% on his MCR3U test."',
+          ],
+          single_cta:
+            "Book or Activate Your Teen's $139 CAD/mo Tier 2 Managed Hybrid Plan (30-Day Active-Habit Guarantee)",
+          asset_body: content,
+          devils_advocate: {
+            primary_failure_hypothesis:
+              "Parents may hesitate if this manual draft does not explicitly contrast Socratic AI hints against answer-dumping chatbots.",
+            blind_spot_question:
+              "Does this asset cite a real parent objection from this week's reality log?",
+          },
+          kill_criteria: {
+            sample_threshold: "15 parent interactions / debriefs",
+            stop_loss_metric: "< 20% conversion to next funnel step",
+            pivot_action:
+              "Refine via CMO Co-Pilot chat using the top winning touchpoint from WeeklyRealityLog.",
+          },
+          revision_notes: "Manual draft created by Acting CMO.",
+        },
       };
       return {
         assets: [created, ...state.assets],

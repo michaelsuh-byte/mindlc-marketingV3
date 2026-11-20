@@ -30,9 +30,110 @@ export type AssetPlatform =
   | "Facebook"
   | "Blog"
   | "SEO Meta"
-  | "Email Sequence";
+  | "Email Sequence"
+  | "Cognitive Report & Debrief Script"
+  | "Parent Referral & Seminar Kit";
 
 export type DetailLevel = 1 | 2 | 3;
+
+// ============================================================================
+// 1. WEEKLY REALITY GATE (DATA-LOCKED GENERATION) TYPES
+// ============================================================================
+
+export type VoCContextTag =
+  | "trust"
+  | "price"
+  | "ai_cheating"
+  | "student_motivation"
+  | "curriculum";
+
+export interface VerbatimParentQuote {
+  id: string; // e.g., "VOC-101"
+  quote_text: string;
+  context_tag: VoCContextTag;
+  week_start_date: string;
+}
+
+export interface WeeklyFunnelMetrics {
+  reach_or_contacts: number;
+  diag_booked: number;
+  diag_completed: number;
+  paid_conversions: number;
+}
+
+export interface WeeklyRealityLog {
+  id: string;
+  week_start_date: string; // ISO date string YYYY-MM-DD
+  funnel_metrics: WeeklyFunnelMetrics;
+  verbatim_parent_quotes: VerbatimParentQuote[]; // Minimum 2 required
+  top_winning_touchpoint: string;
+  created_at: string;
+}
+
+export type RealityGateStatus =
+  | "LOCKED"
+  | "UNLOCKED"
+  | "PILOT_WEEK_0_OVERRIDE";
+
+// ============================================================================
+// 2. SINGLE-BOTTLENECK LOCK-IN ENGINE TYPES (0 -> 100 Students @ $139 CAD/mo)
+// ============================================================================
+
+export type ActiveBottleneckStage =
+  | "STAGE_1_CONVERSION"
+  | "STAGE_2_REFERRAL_DIAG"
+  | "STAGE_3_SCALE_ADS";
+
+export interface BottleneckStageConfig {
+  stage: ActiveBottleneckStage;
+  label: string;
+  studentRange: [number, number];
+  lockedObjective: string;
+  targetBenchmark: string;
+  allowedProposalTypes: string[];
+  blockedScope: string[];
+  blockedKeywords: string[];
+}
+
+export interface ScopeDriftWarning {
+  detected: boolean;
+  requestedCommand: string;
+  activeStage: ActiveBottleneckStage;
+  blockedReason: string;
+  bottleneckMathExplanation: string;
+  suggestedInScopeAlternative: string;
+}
+
+// ============================================================================
+// 3. MANDATORY PROPOSAL SCHEMA (DEVIL'S ADVOCATE + KILL CRITERIA) & HITL STATE
+// ============================================================================
+
+export type HITLProposalState =
+  | "DRAFT"
+  | "APPROVED_FOR_EXECUTION"
+  | "VALIDATED_WINNER"
+  | "KILLED_BY_STOP_LOSS";
+
+export interface MandatoryProposalSchema {
+  proposal_id: string;
+  title: string;
+  bottleneck_stage: ActiveBottleneckStage;
+  channel: string;
+  target_metric: string;
+  cited_voc_quotes: string[]; // Exact quote IDs + snippets from WeeklyRealityLog
+  single_cta: string; // Must be ONE clear next action for the parent
+  asset_body: string; // Markdown string (the actual copy, script, or campaign asset)
+  devils_advocate: {
+    primary_failure_hypothesis: string;
+    blind_spot_question: string;
+  };
+  kill_criteria: {
+    sample_threshold: string;
+    stop_loss_metric: string;
+    pivot_action: string;
+  };
+  revision_notes: string;
+}
 
 export interface Asset {
   id: string;
@@ -44,10 +145,17 @@ export interface Asset {
   skill_used?: string;
   agent_author?: string;
   updated_at?: string;
+  // HITL & Mandatory Proposal Schema extensions
+  proposal_schema?: MandatoryProposalSchema;
+  hitl_state?: HITLProposalState;
+  devils_advocate_verified?: boolean;
+  kill_criteria_acknowledged?: boolean;
+  revision_count?: number;
 }
 
 export interface BrandPersona {
   companyName: string;
+  planNameAndPrice: string; // "Tier 2 Managed Hybrid Plan: $139 CAD/month"
   targetAudience: string;
   coreHook: string;
   curriculumFocus: string;
@@ -57,10 +165,11 @@ export interface BrandPersona {
 }
 
 export interface MandatoryOutputProtocol {
-  protocolVersion: "1.0-MINDLC";
+  protocolVersion: "2.0-MINDLC-HITL";
   targetPlatform: AssetPlatform;
   assetTitle: string;
   marketingContent: string;
+  proposalSchema: MandatoryProposalSchema;
   strategicJustification: {
     detailLevel: DetailLevel;
     levelLabel:
@@ -71,19 +180,22 @@ export interface MandatoryOutputProtocol {
     rationaleBody: string;
     frameworksApplied: string[];
     mentorshipTakeaway?: string;
+    contextCacheStatus?: string;
   };
 }
 
 export interface ChatMessage {
   id: string;
-  sender: "user" | "ai";
+  sender: "user" | "ai" | "guardrail";
   timestamp: string;
   skillName: string;
   detailLevel: DetailLevel;
   userPrompt?: string;
   strategicJustification?: MandatoryOutputProtocol["strategicJustification"];
+  scopeDriftWarning?: ScopeDriftWarning;
   linkedAssetId?: string;
   linkedPlatform?: AssetPlatform;
+  isRevisionTurn?: boolean;
 }
 
 // ============================================================================
@@ -160,9 +272,9 @@ export interface PlannedActivity {
   horizon: PlanHorizon;
   timeWindow: string;
   title: string;
-  tacticalExecution: string; // Concrete, zero-jargon execution blueprint
-  deliverableSpec: string; // Exact output artifact produced
-  marketTrigger: string; // Ontario trend or competitor gap driving this activity
+  tacticalExecution: string;
+  deliverableSpec: string;
+  marketTrigger: string;
   courseCodesTargeted: string[];
   assignedAgentId: string;
   skillName: string;
@@ -173,6 +285,7 @@ export interface PlannedActivity {
   outputAssetId?: string;
   adjustedByCmo?: boolean;
   cmoAdjustmentNote?: string;
+  requiredStage?: ActiveBottleneckStage;
 }
 
 export interface PlanQaExchange {

@@ -13,8 +13,14 @@ import {
 } from "lucide-react";
 
 export function AiSettingsPersonaView() {
-  const { brandPersona, updateBrandPersona, skills, detailLevel } =
-    useMarketingStore();
+  const {
+    brandPersona,
+    updateBrandPersona,
+    skills,
+    detailLevel,
+    activeBottleneckStage,
+    weeklyRealityLogs,
+  } = useMarketingStore();
 
   const [formState, setFormState] = useState(brandPersona);
   const [savedBanner, setSavedBanner] = useState(false);
@@ -26,10 +32,18 @@ export function AiSettingsPersonaView() {
     setTimeout(() => setSavedBanner(false), 3000);
   };
 
+  const allQuotes = weeklyRealityLogs
+    .flatMap((l) => l.verbatim_parent_quotes)
+    .slice(0, 10);
+  const latestMetrics = weeklyRealityLogs[0]?.funnel_metrics;
+
   const sampleCompiledPrompt = buildGeminiSystemInstruction(
     skills[0],
     formState,
-    detailLevel
+    detailLevel,
+    activeBottleneckStage,
+    allQuotes,
+    latestMetrics
   );
 
   return (
@@ -37,14 +51,16 @@ export function AiSettingsPersonaView() {
       <div>
         <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-teal-700 mb-1">
           <Sliders className="w-4 h-4" />
-          Page 3 · Persistent Brand Memory & Guardrails
+          Page 3 · Persistent Brand Memory, VoC Context Cache &amp; Schema
         </div>
         <h1 className="text-2xl font-extrabold text-slate-900">
-          AI Settings, MindLC Persona & Database Schema
+          AI Settings, MindLC Persona ($139 CAD/mo Tier 2) &amp; Safeguard Schema
         </h1>
         <p className="text-sm text-slate-600">
-          Define MindLC&apos;s core value proposition so the AI never forgets
-          your Ontario Grades 7–12 positioning across every skill and campaign.
+          Inspect how the latest 10 `verbatim_parent_quotes` from
+          `WeeklyRealityLog`, computed conversion rates, and the active
+          `ActiveBottleneckStage` are context-cached into the Marketing
+          Agent&apos;s system instruction.
         </p>
       </div>
 
@@ -66,11 +82,11 @@ export function AiSettingsPersonaView() {
             <div className="flex items-center gap-2">
               <ShieldCheck className="w-5 h-5 text-teal-600" />
               <h2 className="font-bold text-slate-900 text-base">
-                MindLC Core Positioning & Value Proposition
+                MindLC Core Positioning &amp; Tier 2 Managed Hybrid Offer
               </h2>
             </div>
             <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200">
-              Always Injected
+              Context-Cached
             </span>
           </div>
 
@@ -91,22 +107,25 @@ export function AiSettingsPersonaView() {
 
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                Google Gemini Model Target
+                Offer Plan &amp; Price Point
               </label>
               <input
                 type="text"
-                value={formState.geminiModel}
+                value={formState.planNameAndPrice}
                 onChange={(e) =>
-                  setFormState({ ...formState, geminiModel: e.target.value })
+                  setFormState({
+                    ...formState,
+                    planNameAndPrice: e.target.value,
+                  })
                 }
-                className="w-full px-3.5 py-2 rounded-xl border border-slate-300 font-mono text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-bold text-teal-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
               />
             </div>
           </div>
 
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-teal-700 mb-1">
-              Core Positioning Hook (Primary Guardrail)
+              Core Positioning Hook (First 100 Paid Students Guardrail)
             </label>
             <textarea
               rows={3}
@@ -120,7 +139,7 @@ export function AiSettingsPersonaView() {
 
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-              Target Audience (Ontario Parents & Grades 7–12 Students)
+              Target Audience (Ontario Grades 9–12 STEM Parents)
             </label>
             <textarea
               rows={2}
@@ -134,7 +153,7 @@ export function AiSettingsPersonaView() {
 
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-              Ontario Ministry Curriculum Focus & Course Codes
+              Ontario Ministry Curriculum Focus &amp; Course Codes
             </label>
             <textarea
               rows={2}
@@ -148,7 +167,7 @@ export function AiSettingsPersonaView() {
 
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-              Parent Objections & Socratic AI Guardrails
+              Parent Objections &amp; 30-Day Active-Habit Guarantee
             </label>
             <textarea
               rows={3}
@@ -169,24 +188,24 @@ export function AiSettingsPersonaView() {
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm shadow-sm transition"
             >
               <Save className="w-4 h-4 text-teal-400" />
-              Save Persona & Guardrails
+              Save Persona &amp; Guardrails
             </button>
           </div>
         </form>
 
-        {/* Right 5 Cols: Compiled Gemini System Prompt Preview + Supabase Schema Reference */}
+        {/* Right 5 Cols: Compiled Context-Cached Gemini System Prompt + Schema */}
         <div className="lg:col-span-5 space-y-6">
           <div className="bg-slate-900 text-slate-100 rounded-2xl p-5 border border-slate-800 space-y-3">
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-teal-400">
                 <Code2 className="w-4 h-4" />
-                Compiled Gemini System Instruction
+                Context-Cached System Prompt (`WeeklyRealityLog` + Stage Lock)
               </span>
               <span className="text-[11px] font-mono text-slate-400">
                 services/marketingAi.ts
               </span>
             </div>
-            <pre className="text-[11px] font-mono text-slate-300 bg-slate-950/80 p-3.5 rounded-xl border border-slate-800 overflow-x-auto whitespace-pre-wrap max-h-64">
+            <pre className="text-[11px] font-mono text-slate-300 bg-slate-950/80 p-3.5 rounded-xl border border-slate-800 overflow-x-auto whitespace-pre-wrap max-h-80">
               {sampleCompiledPrompt}
             </pre>
           </div>
@@ -198,7 +217,7 @@ export function AiSettingsPersonaView() {
                 PostgreSQL Schema (`supabase/schema.sql`)
               </span>
               <span className="text-[11px] font-semibold text-teal-700">
-                4 Core Tables
+                5 Core Tables
               </span>
             </div>
             <ul className="text-xs text-slate-600 space-y-2 font-mono bg-slate-50 p-3.5 rounded-xl border border-slate-200">
@@ -216,8 +235,16 @@ export function AiSettingsPersonaView() {
                 created_at
               </li>
               <li>
+                <strong className="text-slate-900">
+                  weekly_reality_logs:
+                </strong>{" "}
+                id (PK), week_start_date, funnel_metrics (JSONB),
+                verbatim_parent_quotes (JSONB), top_winning_touchpoint
+              </li>
+              <li>
                 <strong className="text-slate-900">assets:</strong> id (PK),
-                campaign_id (FK), platform, content, detail_level_used (1–3)
+                campaign_id (FK), platform, content, detail_level_used (1–3),
+                bottleneck_stage, hitl_state, proposal_schema (JSONB)
               </li>
             </ul>
           </div>

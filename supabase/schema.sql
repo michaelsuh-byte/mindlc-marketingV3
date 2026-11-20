@@ -1,6 +1,7 @@
 -- ============================================================================
 -- MindLC AI Marketing Command Center — Supabase PostgreSQL Schema & Seed Data
--- Target: Ontario Math Grades 7-12 (Human Learning Managers + Socratic AI)
+-- Target: First 100 Paid Students (Tier 2 Managed Hybrid Plan: $139 CAD/mo)
+-- Includes: Weekly Reality Gate, Single-Bottleneck Lock-In, & Mandatory Proposal Schema
 -- ============================================================================
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -29,20 +30,38 @@ CREATE TABLE IF NOT EXISTS public.campaigns (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 4. ASSETS TABLE
-CREATE TABLE IF NOT EXISTS public.assets (
+-- 4. WEEKLY_REALITY_LOGS TABLE (Safeguard 1: Weekly Reality Gate & VoC Cache)
+CREATE TABLE IF NOT EXISTS public.weekly_reality_logs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  campaign_id UUID NOT NULL REFERENCES public.campaigns(id) ON DELETE CASCADE,
-  platform TEXT NOT NULL CHECK (platform IN ('Landing Page', 'Facebook', 'Blog', 'SEO Meta', 'Email Sequence')),
-  content TEXT NOT NULL,
-  detail_level_used INTEGER NOT NULL DEFAULT 2 CHECK (detail_level_used BETWEEN 1 AND 3),
+  week_start_date DATE UNIQUE NOT NULL,
+  funnel_metrics JSONB NOT NULL, -- { reach_or_contacts, diag_booked, diag_completed, paid_conversions }
+  verbatim_parent_quotes JSONB NOT NULL, -- [{ id, quote_text, context_tag, week_start_date }]
+  top_winning_touchpoint TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Row-Level Security (RLS) Setup for Supabase Auth
+-- 5. ASSETS & HITL PROPOSALS TABLE (Safeguard 3 & 4: Mandatory Proposal Schema + HITL State Machine)
+CREATE TABLE IF NOT EXISTS public.assets (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  campaign_id UUID NOT NULL REFERENCES public.campaigns(id) ON DELETE CASCADE,
+  platform TEXT NOT NULL,
+  content TEXT NOT NULL,
+  detail_level_used INTEGER NOT NULL DEFAULT 2 CHECK (detail_level_used BETWEEN 1 AND 3),
+  bottleneck_stage TEXT NOT NULL DEFAULT 'STAGE_1_CONVERSION' CHECK (
+    bottleneck_stage IN ('STAGE_1_CONVERSION', 'STAGE_2_REFERRAL_DIAG', 'STAGE_3_SCALE_ADS')
+  ),
+  hitl_state TEXT NOT NULL DEFAULT 'DRAFT' CHECK (
+    hitl_state IN ('DRAFT', 'APPROVED_FOR_EXECUTION', 'VALIDATED_WINNER', 'KILLED_BY_STOP_LOSS')
+  ),
+  proposal_schema JSONB, -- Full validated MandatoryProposalSchema (devils_advocate, kill_criteria, cited_voc_quotes, single_cta)
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Row-Level Security (RLS) Setup
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.marketing_skills ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.campaigns ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.weekly_reality_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.assets ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Allow authenticated read/write on users"
@@ -54,37 +73,8 @@ CREATE POLICY "Allow authenticated read/write on marketing_skills"
 CREATE POLICY "Allow authenticated read/write on campaigns"
   ON public.campaigns FOR ALL USING (true) WITH CHECK (true);
 
+CREATE POLICY "Allow authenticated read/write on weekly_reality_logs"
+  ON public.weekly_reality_logs FOR ALL USING (true) WITH CHECK (true);
+
 CREATE POLICY "Allow authenticated read/write on assets"
   ON public.assets FOR ALL USING (true) WITH CHECK (true);
-
--- ============================================================================
--- SEED DATA FOR MINDLC (Ontario Grades 7-12 Math EdTech)
--- ============================================================================
-
-INSERT INTO public.users (email, role)
-VALUES ('founder@mindlc.ca', 'Admin')
-ON CONFLICT (email) DO NOTHING;
-
-INSERT INTO public.marketing_skills (skill_name, system_prompt)
-VALUES
-  (
-    'copywriting',
-    'You are an elite EdTech conversion copywriter trained on PAS (Problem-Agitate-Solve), Before-After-Bridge, and JTBD frameworks. Write high-converting landing page and campaign copy for MindLC. Emphasize clarity over cleverness, address Ontario parents'' anxiety around Grade 7-12 Math (EQAO Grade 9, MCR3U Grade 11 Functions, MHF4U/MCV4U Grade 12), and contrast passive video tutoring or generic chatbots against MindLC''s dual model: a dedicated Human Learning Manager for weekly accountability + 24/7 Socratic AI that never just hands over the answer.'
-  ),
-  (
-    'ai-seo',
-    'You are an AI Search & SEO Architect specializing in Answer Engine Optimization (AEO/GEO) for ChatGPT, Perplexity, Google AI Overviews, and Ontario high-intent organic search. Structure content with self-contained 40-60 word answer blocks, question-based H2 headings, Ontario curriculum course codes (MTH1W, MPM2D, MCR3U, MHF4U, MCV4U), and verifiable statistics so both Google and LLMs cite MindLC as the premier Ontario math learning system.'
-  ),
-  (
-    'social-content',
-    'You are a high-empathy paid & organic social strategist for Facebook, Instagram, and LinkedIn targeting Ontario parents of Grade 7-12 students. Use scroll-stopping hooks rooted in real kitchen-table math frustration ("9:30 PM before a Grade 11 Functions unit test..."), clear emotional validation, and a low-friction CTA to book a Free MindLC Diagnostic & Learning Manager Consult.'
-  ),
-  (
-    'copy-editing',
-    'You are a ruthless Seven-Sweeps Copy Editor. Audit and rewrite existing MindLC copy across 7 passes: (1) Clarity, (2) Voice & Tone, (3) So-What benefit test, (4) Prove-It specificity check, (5) Specificity upgrade, (6) Heightened parent/student emotion, and (7) Zero-Risk CTA friction removal.'
-  ),
-  (
-    'cro',
-    'You are a Conversion Rate Optimization (CRO) Lead. Analyze and structure MindLC landing pages across 7 dimensions: 5-Second Value Prop Clarity, Outcome-Driven Headline, High-Contrast Value CTA Copy, Visual Scannability, Ontario Parent Social Proof Proximity, Anti-Cheating/Socratic AI Objection Handling, and 2-Step Low-Friction Lead Capture.'
-  )
-ON CONFLICT (skill_name) DO NOTHING;

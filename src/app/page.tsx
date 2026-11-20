@@ -2,6 +2,7 @@
 
 import React from "react";
 import { Sidebar } from "@/components/Sidebar";
+import { SafeguardTopBar } from "@/components/SafeguardTopBar";
 import { DashboardView } from "@/components/DashboardView";
 import { MarketIntelView } from "@/components/MarketIntelView";
 import { CmoPlannerAgentsView } from "@/components/CmoPlannerAgentsView";
@@ -18,15 +19,18 @@ export default function MindLCCommandCenterApp() {
       {/* Persistent Sidebar Navigation */}
       <Sidebar />
 
-      {/* Main Dynamic Workspace */}
-      <main className="flex-1 min-w-0 overflow-y-auto">
-        {activeTab === "dashboard" && <DashboardView />}
-        {activeTab === "planner" && <CmoPlannerAgentsView />}
-        {activeTab === "intel" && <MarketIntelView />}
-        {activeTab === "copilot" && <CampaignCoPilotView />}
-        {activeTab === "skills" && <SkillLibraryView />}
-        {activeTab === "settings" && <AiSettingsPersonaView />}
-      </main>
+      {/* Main Dynamic Workspace with Persistent Conversion Safeguards Ribbon */}
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+        <SafeguardTopBar />
+        <main className="flex-1 min-w-0 overflow-y-auto">
+          {activeTab === "dashboard" && <DashboardView />}
+          {activeTab === "planner" && <CmoPlannerAgentsView />}
+          {activeTab === "intel" && <MarketIntelView />}
+          {activeTab === "copilot" && <CampaignCoPilotView />}
+          {activeTab === "skills" && <SkillLibraryView />}
+          {activeTab === "settings" && <AiSettingsPersonaView />}
+        </main>
+      </div>
     </div>
   );
 }
