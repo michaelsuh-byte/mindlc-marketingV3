@@ -3,6 +3,8 @@
 import React from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { DashboardView } from "@/components/DashboardView";
+import { MarketIntelView } from "@/components/MarketIntelView";
+import { CmoPlannerAgentsView } from "@/components/CmoPlannerAgentsView";
 import { CampaignCoPilotView } from "@/components/CampaignCoPilotView";
 import { SkillLibraryView } from "@/components/SkillLibraryView";
 import { AiSettingsPersonaView } from "@/components/AiSettingsPersonaView";
@@ -19,6 +21,8 @@ export default function MindLCCommandCenterApp() {
       {/* Main Dynamic Workspace */}
       <main className="flex-1 min-w-0 overflow-y-auto">
         {activeTab === "dashboard" && <DashboardView />}
+        {activeTab === "planner" && <CmoPlannerAgentsView />}
+        {activeTab === "intel" && <MarketIntelView />}
         {activeTab === "copilot" && <CampaignCoPilotView />}
         {activeTab === "skills" && <SkillLibraryView />}
         {activeTab === "settings" && <AiSettingsPersonaView />}

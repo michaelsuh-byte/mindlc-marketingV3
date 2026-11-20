@@ -1,9 +1,14 @@
 import {
   AssetPlatform,
   BrandPersona,
+  CompetitorProfile,
   DetailLevel,
   MandatoryOutputProtocol,
+  MarketingAgent,
   MarketingSkill,
+  OntarioTrendSignal,
+  PlanHorizon,
+  PlannedActivity,
 } from "@/types/database";
 
 export interface GenerateMarketingRequest {
@@ -14,10 +19,6 @@ export interface GenerateMarketingRequest {
   preferredPlatform?: AssetPlatform;
 }
 
-/**
- * Builds the exact system instruction for Google Gemini API (@google/genai)
- * enforcing the Mandatory Output Protocol.
- */
 export function buildGeminiSystemInstruction(
   skill: MarketingSkill,
   persona: BrandPersona,
@@ -53,32 +54,54 @@ function inferPlatformFromCommand(
 ): AssetPlatform {
   if (preferred) return preferred;
   const lower = command.toLowerCase();
-  if (lower.includes("facebook") || lower.includes("instagram") || lower.includes("social") || lower.includes("ad") || skillName === "social-content") {
+  if (
+    lower.includes("facebook") ||
+    lower.includes("instagram") ||
+    lower.includes("social") ||
+    lower.includes("ad") ||
+    skillName === "social-content"
+  ) {
     return "Facebook";
   }
-  if (lower.includes("seo") || lower.includes("meta") || lower.includes("keyword") || lower.includes("perplexity") || lower.includes("chatgpt") || skillName === "ai-seo") {
+  if (
+    lower.includes("seo") ||
+    lower.includes("meta") ||
+    lower.includes("keyword") ||
+    lower.includes("perplexity") ||
+    lower.includes("chatgpt") ||
+    skillName === "ai-seo"
+  ) {
     return "SEO Meta";
   }
-  if (lower.includes("blog") || lower.includes("article") || lower.includes("guide")) {
+  if (
+    lower.includes("blog") ||
+    lower.includes("article") ||
+    lower.includes("guide")
+  ) {
     return "Blog";
   }
-  if (lower.includes("email") || lower.includes("sequence") || lower.includes("drip")) {
+  if (
+    lower.includes("email") ||
+    lower.includes("sequence") ||
+    lower.includes("drip")
+  ) {
     return "Email Sequence";
   }
   return "Landing Page";
 }
 
-/**
- * Mocked Google Gemini API service implementing the Mandatory Output Protocol.
- * Structured for drop-in replacement with `new GoogleGenAI({ apiKey }).models.generateContent(...)`.
- */
 export async function generateMarketingResponse(
   req: GenerateMarketingRequest
 ): Promise<MandatoryOutputProtocol> {
-  const { userCommand, selectedSkill, detailLevel, brandPersona, preferredPlatform } = req;
+  const {
+    userCommand,
+    selectedSkill,
+    detailLevel,
+    brandPersona,
+    preferredPlatform,
+  } = req;
 
-  // Simulate realistic Gemini API streaming/inference latency
-  await new Promise((resolve) => setTimeout(resolve, 650));
+  await new Promise((resolve) => setTimeout(resolve, 550));
 
   const platform = inferPlatformFromCommand(
     userCommand,
@@ -86,19 +109,23 @@ export async function generateMarketingResponse(
     preferredPlatform
   );
 
-  // Extract topic focus from user prompt (e.g., Grade 9 EQAO, MCR3U Functions, Calculus, etc.)
   const lowerCmd = userCommand.toLowerCase();
-  const gradeFocus = lowerCmd.includes("eqao") || lowerCmd.includes("grade 9") || lowerCmd.includes("mth1w")
-    ? "Grade 9 De-Streamed Math (MTH1W) & EQAO Prep"
-    : lowerCmd.includes("11") || lowerCmd.includes("functions") || lowerCmd.includes("mcr3u")
-    ? "Grade 11 University Functions (MCR3U)"
-    : lowerCmd.includes("12") || lowerCmd.includes("calculus") || lowerCmd.includes("mhf4u") || lowerCmd.includes("mcv4u")
-    ? "Grade 12 Advanced Functions (MHF4U) & Calculus (MCV4U)"
-    : "Ontario Grades 7–12 Math (EQAO, Functions & Calculus)";
+  const gradeFocus =
+    lowerCmd.includes("eqao") ||
+    lowerCmd.includes("grade 9") ||
+    lowerCmd.includes("mth1w")
+      ? "Grade 9 De-Streamed Math (MTH1W) & EQAO Prep"
+      : lowerCmd.includes("11") ||
+        lowerCmd.includes("functions") ||
+        lowerCmd.includes("mcr3u")
+      ? "Grade 11 University Functions (MCR3U)"
+      : lowerCmd.includes("12") ||
+        lowerCmd.includes("calculus") ||
+        lowerCmd.includes("mhf4u") ||
+        lowerCmd.includes("mcv4u")
+      ? "Grade 12 Advanced Functions (MHF4U) & Calculus (MCV4U)"
+      : "Ontario Grades 7–12 Math (EQAO, Functions & Calculus)";
 
-  // =========================================================================
-  // PART 1: STRICTLY SEPARATED MARKETING CONTENT (Left Pane: Asset Canvas)
-  // =========================================================================
   let marketingContent = "";
   let assetTitle = "";
 
@@ -124,7 +151,10 @@ That’s why Ontario families are switching to ${brandPersona.companyName}:
   } else if (platform === "SEO Meta") {
     assetTitle = `AI-SEO & Search Architecture — ${gradeFocus}`;
     marketingContent = `🔍 [SEO META TAGS & OPENGRAPH]
-• URL Slug: /ontario-math-tutoring/${gradeFocus.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}
+• URL Slug: /ontario-math-tutoring/${gradeFocus
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")}
 • Title Tag (58 chars): ${gradeFocus} Help | Human Coach + Socratic AI | MindLC
 • Meta Description (154 chars): Struggling with ${gradeFocus}? MindLC pairs a dedicated Human Learning Manager for accountability with 24/7 Socratic AI math hints for Ontario Grades 7–12.
 
@@ -187,7 +217,6 @@ Hi {{parent_first_name}},
 If a student copies an AI answer on Tuesday, they fail the test on Friday.
 Our Socratic AI is trained on Ontario Grades 7–12 curriculum expectations to ask the exact guiding question a great teacher would ask...`;
   } else {
-    // Default: High-Converting Landing Page Copy
     assetTitle = `Hero & Conversion Landing Page — ${gradeFocus}`;
     marketingContent = `🎯 [ABOVE-THE-FOLD HERO SECTION]
 • Eyebrow Badge: BUILT FOR ONTARIO GRADES 7–12 MATH (MTH1W · MPM2D · MCR3U · MHF4U · MCV4U)
@@ -213,10 +242,6 @@ Our Socratic AI is trained on Ontario Grades 7–12 curriculum expectations to a
   Your dedicated Human Learning Manager conducts weekly check-ins, reviews AI session logs, and sends you clear parent progress updates.`;
   }
 
-  // =========================================================================
-  // PART 2: STRICTLY SEPARATED STRATEGIC JUSTIFICATION (Right Pane: Chat Feed)
-  // Calibrated to Detail Level 1, 2, or 3
-  // =========================================================================
   const levelMap = {
     1: {
       levelLabel: "Level 1: Executive Summary (Fast)" as const,
@@ -260,5 +285,334 @@ Our Socratic AI is trained on Ontario Grades 7–12 curriculum expectations to a
       detailLevel,
       ...levelMap[detailLevel],
     },
+  };
+}
+
+/**
+ * Autonomous Agent Task Executor:
+ * Generates a concrete, zero-jargon marketing deliverable tailored to the exact PlannedActivity
+ * and routes it straight into the Campaign Asset Canvas.
+ */
+export async function executeAutonomousAgentTask(params: {
+  activity: PlannedActivity;
+  agent: MarketingAgent;
+  brandPersona: BrandPersona;
+}): Promise<{
+  assetTitle: string;
+  platform: AssetPlatform;
+  content: string;
+  agentReport: string;
+}> {
+  const { activity, agent, brandPersona } = params;
+  await new Promise((r) => setTimeout(r, 500));
+
+  const codes = activity.courseCodesTargeted.join(" · ") || "MTH1W · MCR3U · MHF4U";
+
+  let content = "";
+  if (activity.targetPlatform === "Facebook") {
+    content = `📣 [${agent.codeName} AUTONOMOUS AD DELIVERABLE — ${activity.horizon.toUpperCase()} PLAN]
+• Campaign Task: ${activity.title}
+• Market Trigger: ${activity.marketTrigger}
+• Target Ontario Courses: ${codes}
+• Target KPI: ${activity.targetKpi}
+
+---
+
+[PRIMARY AD COPY — META / INSTAGRAM ONTARIO PARENTS]
+"We paid $320/month for a franchise math centre, and my teen still froze on Grade 11 Functions word problems."
+
+Sound familiar? Worksheet centres drill Grade 4 arithmetic, and $80/hr private tutors are only there 1 hour a week.
+When your teen hits a wall in ${codes} at 9:45 PM before a unit test, they need two things:
+
+1️⃣ **A Dedicated Human Learning Manager:** Meets weekly with your teen to inspect their Ontario course syllabus, set unit-test milestones, and hold them accountable.
+2️⃣ **24/7 Socratic AI Math Coach:** Never hands over the final answer like ChatGPT. Instead, it asks guided step-by-step questions aligned to Ontario Ministry rubrics (Knowledge, Application, Thinking, Communication) until your child solves it independently.
+
+👉 [HEADLINE]: ${activity.deliverableSpec}
+👉 [CTA BUTTON]: Book Your Free 20-Min Ontario Math Diagnostic & Study Plan →`;
+  } else if (activity.targetPlatform === "SEO Meta") {
+    content = `🔍 [${agent.codeName} AUTONOMOUS AI-SEO & SEARCH DELIVERABLE — ${activity.horizon.toUpperCase()} PLAN]
+• Task: ${activity.title}
+• Trigger Signal: ${activity.marketTrigger}
+• Target Course Codes: ${codes}
+• Target KPI: ${activity.targetKpi}
+
+---
+
+[1. ON-PAGE SEO META & CANONICAL ARCHITECTURE]
+• Title Tag (59 chars): ${codes} Math Help Ontario | Human Coach + 24/7 Socratic AI
+• Meta Description (156 chars): ${activity.deliverableSpec}. MindLC pairs a dedicated Human Learning Manager for weekly accountability with 24/7 Socratic AI guided math hints.
+
+[2. 52-WORD AEO / LLM CITATION ANSWER BLOCK (CHATGPT, PERPLEXITY & GOOGLE AI OVERVIEWS)]
+## Why are Ontario parents switching from traditional tutoring to MindLC for ${codes}?
+Unlike 1-hour weekly tutors or worksheet centres (Kumon/Mathnasium), **MindLC** combines a **Human Learning Manager** for weekly curriculum accountability with a **24/7 Socratic AI tutor** calibrated to Ontario course codes (${codes}). The Socratic AI guides students through multi-step word problems via hints without giving away final answers.
+
+[3. JSON-LD FAQ SCHEMA QUESTIONS DEPLOYED]
+1. How does MindLC prepare Grade 9 students for the Ontario EQAO MTH1W assessment?
+2. Why does Socratic AI prevent test-day blanking compared to ChatGPT or Photomath?
+3. How does the Human Learning Manager keep unmotivated teens accountable each week?`;
+  } else if (activity.targetPlatform === "Email Sequence") {
+    content = `📧 [${agent.codeName} AUTONOMOUS LIFECYCLE SEQUENCE — ${activity.horizon.toUpperCase()} PLAN]
+• Task: ${activity.title}
+• Market Trigger: ${activity.marketTrigger}
+• Target KPI: ${activity.targetKpi}
+
+---
+
+[EMAIL 1: SENT 5 MINUTES AFTER ONTARIO MATH DIAGNOSTIC BOOKING]
+Subject: Confirmed: {{student_first_name}}'s Ontario Math Diagnostic (${codes}) + 60-sec prep
+Preview: Meet your Human Learning Manager & see how our Socratic AI works.
+
+Hi {{parent_first_name}},
+
+Your 20-minute Ontario Math Diagnostic for {{student_first_name}} is locked in.
+Before we meet, here is why ${brandPersona.companyName} works when $80/hr weekly tutoring and generic AI tools fail:
+
+• **Weekly Human Accountability:** Your Human Learning Manager maps out {{student_first_name}}'s exact upcoming unit tests in ${codes} and checks in every week.
+• **24/7 Socratic AI Guided Hints:** Available at 9:45 PM when homework stalls—strictly guardrailed to ask Socratic guiding questions rather than handing over answers.
+
+👉 [ACTION REQUIRED (90 SECONDS)]: Reply with {{student_first_name}}'s current math course code (${codes}) and their latest unit test mark so we can tailor your diagnostic.`;
+  } else if (activity.targetPlatform === "Blog") {
+    content = `📝 [${agent.codeName} AUTONOMOUS AUTHORITY ARTICLE & BATTLECARD — ${activity.horizon.toUpperCase()} PLAN]
+# ${activity.title}
+
+**Target Audience:** ${brandPersona.targetAudience}
+**Market Catalyst:** ${activity.marketTrigger}
+**Deliverable Focus:** ${activity.deliverableSpec}
+
+## 1. The Real Reason Ontario Teens Drop 15% Between Grade 10 and Grade 11 Functions (MCR3U)
+In Ontario secondary schools, the jump from Grade 9/10 de-streamed math (` + "`MTH1W` / `MPM2D`" + `) to Grade 11 University Functions (` + "`MCR3U`" + `) and Grade 12 Advanced Functions (` + "`MHF4U`" + `) is where memorization stops working. Ministry rubrics weight **Thinking & Application** word problems heavily.
+
+## 2. Head-to-Head Comparison: MindLC vs. Old-School Alternatives
+| Criteria | Franchise Centres (Kumon / Mathnasium) | $80/hr 1-on-1 Private Tutors | Generic AI (ChatGPT / Photomath) | **MindLC (Human Manager + Socratic AI)** |
+|---|---|---|---|---|
+| **Ontario Gr. 7–12 Course Alignment** | Repetitive arithmetic drills | Varies by tutor | Unaligned to Ontario rubrics | **Built for MTH1W, MCR3U, MHF4U, MCV4U** |
+| **Tuesday 9:45 PM Homework Help** | ❌ Closed | ❌ Off-duty | ⚠️ Gives answer (causes cheating) | **✅ 24/7 Socratic AI step-by-step hints** |
+| **Weekly Teen Accountability** | ❌ Passive drop-off | ⚠️ Only during 1-hr call | ❌ Zero accountability | **✅ Dedicated Human Learning Manager** |
+
+## 3. Book Your Child's Free 20-Minute Ontario Math Diagnostic
+**[Schedule Your Free Diagnostic & Meet Your Human Learning Manager →]**`;
+  } else {
+    content = `🎯 [${agent.codeName} AUTONOMOUS CRO LANDING PAGE DELIVERABLE — ${activity.horizon.toUpperCase()} PLAN]
+• Activity: ${activity.title}
+• Market Catalyst: ${activity.marketTrigger}
+• Target KPI: ${activity.targetKpi}
+
+---
+
+[HERO SECTION — HIGH-INTENT ONTARIO PARENT CONVERSION FLOW]
+• Eyebrow: ONTARIO GRADES 7–12 MATH · ${codes}
+• Headline (H1): ${activity.deliverableSpec}
+• Subheadline: Stop paying $80/hr for once-a-week tutors who aren't there on Tuesday night—or watching your teen copy answers from generic AI. ${brandPersona.companyName} pairs a **Human Learning Manager** for weekly accountability with **24/7 Socratic AI** guided hints.
+• Primary CTA Button: Book Your Free 20-Min Ontario Math Diagnostic →
+• 2-Step Low-Friction Micro-Form:
+  - Step 1: Select Student Grade (Gr. 7–8 | Gr. 9 MTH1W | Gr. 10 MPM2D | Gr. 11 MCR3U | Gr. 12 MHF4U/MCV4U)
+  - Step 2: Parent Email & Mobile for Instant Diagnostic Calendar Link`;
+  }
+
+  return {
+    assetTitle: `[${agent.codeName} · ${activity.horizon}] ${activity.title}`,
+    platform: activity.targetPlatform,
+    content,
+    agentReport: `${agent.codeName} (${agent.roleTitle}) executed "${activity.title}" using [${activity.skillName}] targeting ${codes} (${activity.targetKpi}). Asset published to Campaign Canvas.`,
+  };
+}
+
+/**
+ * Interactive CMO Plan Q&A & Dynamic Multi-Horizon Plan Re-Calibrator:
+ * Takes a CMO question or directive, analyzes Ontario market trends & competitor gaps,
+ * and returns both a concrete strategic answer AND new/adjusted PlannedActivities.
+ */
+export async function evaluateCmoPlanQuestionAndAdjust(params: {
+  question: string;
+  activeHorizon: PlanHorizon;
+  trends: OntarioTrendSignal[];
+  competitors: CompetitorProfile[];
+  brandPersona: BrandPersona;
+}): Promise<{
+  strategistAnswer: string;
+  horizonAffected: PlanHorizon;
+  newActivities: PlannedActivity[];
+  adjustmentSummary: string[];
+}> {
+  const { question, activeHorizon } = params;
+  await new Promise((r) => setTimeout(r, 450));
+
+  const q = question.toLowerCase();
+
+  // Determine which horizon & scenario the CMO is asking about
+  const targetHorizon: PlanHorizon = q.includes("daily") || q.includes("today")
+    ? "Daily"
+    : q.includes("weekly") || q.includes("week")
+    ? "Weekly"
+    : q.includes("monthly") || q.includes("month")
+    ? "Monthly"
+    : q.includes("quarter") || q.includes("q1") || q.includes("q2") || q.includes("q3") || q.includes("q4")
+    ? "Quarterly"
+    : q.includes("annual") || q.includes("year")
+    ? "Annual"
+    : activeHorizon;
+
+  const isEqaoFocus = q.includes("eqao") || q.includes("grade 9") || q.includes("mth1w");
+  const isFunctionsOrCalc =
+    q.includes("11") ||
+    q.includes("12") ||
+    q.includes("mcr3u") ||
+    q.includes("mhf4u") ||
+    q.includes("mcv4u") ||
+    q.includes("functions") ||
+    q.includes("calculus") ||
+    q.includes("midterm") ||
+    q.includes("ouac");
+  const isCompetitorFocus =
+    q.includes("kumon") ||
+    q.includes("mathnasium") ||
+    q.includes("competitor") ||
+    q.includes("chatgpt") ||
+    q.includes("tutor");
+
+  const nowId = Date.now();
+
+  if (isEqaoFocus) {
+    const act1: PlannedActivity = {
+      id: `plan-cmo-${nowId}-1`,
+      horizon: targetHorizon,
+      timeWindow: `${targetHorizon} Priority #1 (CMO Adjusted)`,
+      title: "Launch Grade 9 De-Streamed Math (MTH1W) 14-Day EQAO Parent Diagnostic Sprint",
+      tacticalExecution:
+        "Deploy targeted Meta parent ads in GTA school boards (TDSB, YRDSB, PDSB, HDSB) offering a Free 15-Minute EQAO Readiness Diagnostic + Socratic AI Mock Practice Sheet. Route traffic to a dedicated MTH1W landing page.",
+      deliverableSpec:
+        "MTH1W EQAO Readiness Landing Page Hero + 3 Meta Ad Creatives contrasting passive EQAO workbooks against 24/7 Socratic AI hints + Human Learning Manager check-ins",
+      marketTrigger:
+        "Ontario EQAO Grade 9 Math Assessment window & de-streamed MTH1W parent anxiety spike",
+      courseCodesTargeted: ["MTH1W", "EQAO Grade 9"],
+      assignedAgentId: "agent-social",
+      skillName: "social-content",
+      targetPlatform: "Facebook",
+      funnelObjective: "Lead Generation",
+      targetKpi: "Generate 45+ booked Grade 9 EQAO diagnostics at CPL < $24",
+      status: "Queued",
+      adjustedByCmo: true,
+      cmoAdjustmentNote: `Added via CMO Q&A: "${question.slice(0, 60)}"`,
+    };
+
+    const act2: PlannedActivity = {
+      id: `plan-cmo-${nowId}-2`,
+      horizon: targetHorizon,
+      timeWindow: `${targetHorizon} Priority #2 (CMO Adjusted)`,
+      title: "Publish AI-SEO Answer Block for 'Best Grade 9 EQAO Math Tutor Ontario (MTH1W)'",
+      tacticalExecution:
+        "Structure a 52-word AEO answer block and JSON-LD FAQPage schema explaining how de-streamed Grade 9 MTH1W requires adaptive Socratic scaffolding rather than generic tutoring.",
+      deliverableSpec:
+        "AEO Citation Pillar Section + SEO Meta Tags targeting 'Grade 9 EQAO math help Ontario'",
+      marketTrigger: "42% surge in Ontario parent searches for de-streamed MTH1W EQAO prep",
+      courseCodesTargeted: ["MTH1W"],
+      assignedAgentId: "agent-seo",
+      skillName: "ai-seo",
+      targetPlatform: "SEO Meta",
+      funnelObjective: "Lead Generation",
+      targetKpi: "Earn top-3 citation in ChatGPT Search, Perplexity & Google AI Overviews",
+      status: "Queued",
+      adjustedByCmo: true,
+      cmoAdjustmentNote: `Added via CMO Q&A: "${question.slice(0, 60)}"`,
+    };
+
+    return {
+      horizonAffected: targetHorizon,
+      strategistAnswer: `**CMO Strategic Re-Calibration (Grade 9 MTH1W & EQAO Focus):**\n1. **Why Ontario Grade 9 Parents Convert Fast Right Now:** Since Ontario de-streamed Grade 9 Math (\`MTH1W\`), classrooms have wide skill variance and parents often don't realize their child has foundational algebraic gaps until pre-EQAO practice tests.\n2. **Plan Adjustment Applied to ${targetHorizon} Schedule:** I have assigned **Agent-03 (Paid Social)** to launch a *14-Day EQAO Readiness Diagnostic Sprint* and **Agent-02 (AI-SEO)** to deploy an AEO citation block for \`MTH1W\` search queries.`,
+      newActivities: [act1, act2],
+      adjustmentSummary: [
+        `Injected [${targetHorizon}] Task for Agent-03: Grade 9 MTH1W EQAO Parent Diagnostic Ad Sprint (Target CPL < $24)`,
+        `Injected [${targetHorizon}] Task for Agent-02: AI-SEO Citation Block for "Grade 9 EQAO Math Help Ontario"`,
+      ],
+    };
+  }
+
+  if (isCompetitorFocus) {
+    const act1: PlannedActivity = {
+      id: `plan-cmo-${nowId}-1`,
+      horizon: targetHorizon,
+      timeWindow: `${targetHorizon} Priority #1 (CMO Adjusted)`,
+      title: "Publish 'MindLC vs. Kumon / Mathnasium vs. $80/hr Tutors' Comparison Matrix Page",
+      tacticalExecution:
+        "Build a high-intent buyer comparison article and landing block showing why franchise worksheet centres fail in Grade 9–12 word problems (MTH1W, MCR3U, MHF4U) and why generic chatbots fail on closed-book unit tests.",
+      deliverableSpec:
+        "4-Way Ontario Math Comparison Matrix + Switching Offer ('Bring Your Current Tutoring Receipt for a Free 14-Day Socratic AI + Human Manager Trial')",
+      marketTrigger:
+        "Competitor vulnerability: Franchise centres lack Grade 11/12 MCR3U/MHF4U depth; 1-hr tutors lack 9:45 PM mid-week support",
+      courseCodesTargeted: ["MTH1W", "MCR3U", "MHF4U", "MCV4U"],
+      assignedAgentId: "agent-seo",
+      skillName: "ai-seo",
+      targetPlatform: "Blog",
+      funnelObjective: "Conversion Optimization",
+      targetKpi: "Convert 28%+ of comparison page visitors into Diagnostic Bookings",
+      status: "Queued",
+      adjustedByCmo: true,
+      cmoAdjustmentNote: `Added via CMO Q&A: "${question.slice(0, 60)}"`,
+    };
+
+    return {
+      horizonAffected: targetHorizon,
+      strategistAnswer: `**CMO Strategic Re-Calibration (Competitor Counter-Wedge):**\n1. **Attacking the Structural Gap:** Franchise centres (Kumon/Mathnasium) charge $300–$500/mo for elementary worksheet drills that don't match Ontario Grade 9–12 Thinking/Application rubrics. Meanwhile, $80/hr private tutors leave a 6-day gap between sessions.\n2. **Plan Adjustment Applied to ${targetHorizon} Schedule:** I have dispatched **Agent-02 (AI-SEO & Comparison Content)** to publish a 4-way Ontario Math Comparison Matrix with a direct *Competitor Switching Offer*.`,
+      newActivities: [act1],
+      adjustmentSummary: [
+        `Injected [${targetHorizon}] Task for Agent-02: 4-Way Competitor Comparison Matrix & Switching Offer`,
+      ],
+    };
+  }
+
+  // Default / Functions & Midterm / Conversion Optimization Re-Calibration
+  const act1: PlannedActivity = {
+    id: `plan-cmo-${nowId}-1`,
+    horizon: targetHorizon,
+    timeWindow: `${targetHorizon} Priority #1 (CMO Adjusted)`,
+    title: isFunctionsOrCalc
+      ? "Deploy Grade 11/12 Functions & Calculus (MCR3U / MHF4U / MCV4U) University-Cutoff Rescue Campaign"
+      : `Execute CMO Custom Directive: ${question.slice(0, 68)}`,
+    tacticalExecution:
+      "Target Ontario parents of Grade 11/12 university-bound students worried about OUAC prerequisites (where an 85%+ in MCR3U, MHF4U, and MCV4U is required for Engineering, CS, and Business programs). Pair a 2-step low-friction diagnostic form with a live Socratic AI step-by-step hint preview.",
+    deliverableSpec:
+      "CRO Landing Page Hero + 2-Step Diagnostic Funnel ('Rescue Your Teen's MCR3U / MHF4U Mark Before OUAC Transmission')",
+    marketTrigger:
+      "Ontario Midterm Report Card & OUAC University Prerequisite anxiety window",
+    courseCodesTargeted: ["MCR3U", "MHF4U", "MCV4U"],
+    assignedAgentId: "agent-cro",
+    skillName: "cro",
+    targetPlatform: "Landing Page",
+    funnelObjective: "Conversion Optimization",
+    targetKpi: "Lift landing page Visitor-to-Diagnostic conversion rate from 4.2% to 7.5%+",
+    status: "Queued",
+    adjustedByCmo: true,
+    cmoAdjustmentNote: `Added via CMO Q&A: "${question.slice(0, 60)}"`,
+  };
+
+  const act2: PlannedActivity = {
+    id: `plan-cmo-${nowId}-2`,
+    horizon: targetHorizon,
+    timeWindow: `${targetHorizon} Priority #2 (CMO Adjusted)`,
+    title: "Trigger 3-Part Post-Diagnostic Parent Close Sequence (Human Manager + Socratic AI Proof)",
+    tacticalExecution:
+      "Send automated 3-part email & SMS follow-up within 5 minutes of diagnostic booking containing a 60-second side-by-side clip of Socratic AI vs. ChatGPT on an MCR3U quadratic optimization problem.",
+    deliverableSpec:
+      "3-Touch Parent Conversion Email Sequence with Course-Code Personalization",
+    marketTrigger: "Reduce diagnostic no-show rate and lift post-consult enrollment close rate",
+    courseCodesTargeted: ["MTH1W", "MCR3U", "MHF4U"],
+    assignedAgentId: "agent-lifecycle",
+    skillName: "copywriting",
+    targetPlatform: "Email Sequence",
+    funnelObjective: "Conversion Optimization",
+    targetKpi: "Increase Diagnostic Show-Up Rate to 84%+ and Paid Close Rate to 42%+",
+    status: "Queued",
+    adjustedByCmo: true,
+    cmoAdjustmentNote: `Added via CMO Q&A: "${question.slice(0, 60)}"`,
+  };
+
+  return {
+    horizonAffected: targetHorizon,
+    strategistAnswer: `**CMO Strategic Re-Calibration (${targetHorizon} Plan Updated):**\n1. **Direct Response to Your Directive:** To maximize qualified Ontario parent lead generation and conversion without wasting ad spend, we must tighten the handoff between *high-anxiety course triggers* (\`MCR3U\`, \`MHF4U\`, \`MCV4U\`, \`MTH1W\`) and our *20-Minute Free Diagnostic*.\n2. **Multi-Agent Tasks Injected into ${targetHorizon} Plan:**\n   • **Agent-04 (CRO & Funnel Agent):** Deployed a 2-step university-prerequisite rescue landing flow.\n   • **Agent-05 (Lifecycle & Close Agent):** Deployed an immediate post-booking 3-email parent proof sequence contrasting Socratic AI against answer-dumping chatbots.`,
+    newActivities: [act1, act2],
+    adjustmentSummary: [
+      `Injected [${targetHorizon}] Task for Agent-04 (CRO): 2-Step Diagnostic Funnel for MCR3U/MHF4U/MCV4U`,
+      `Injected [${targetHorizon}] Task for Agent-05 (Lifecycle): 3-Part Post-Diagnostic Parent Close Sequence`,
+    ],
   };
 }

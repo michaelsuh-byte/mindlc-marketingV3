@@ -10,12 +10,26 @@ import {
   ShieldCheck,
   GraduationCap,
   Database,
+  Radar,
+  Bot,
 } from "lucide-react";
 import { isSupabaseConfigured } from "@/lib/supabase";
 
 export function Sidebar() {
-  const { activeTab, setActiveTab, currentUser, skills, campaigns, assets } =
-    useMarketingStore();
+  const {
+    activeTab,
+    setActiveTab,
+    currentUser,
+    skills,
+    campaigns,
+    assets,
+    plannedActivities,
+    ontarioTrends,
+  } = useMarketingStore();
+
+  const queuedActivities = plannedActivities.filter(
+    (a) => a.status === "Queued"
+  ).length;
 
   const navItems: {
     id: NavigationTab;
@@ -29,6 +43,20 @@ export function Sidebar() {
       label: "Dashboard",
       sublabel: "Campaigns & Ontario funnel",
       icon: <LayoutDashboard className="w-5 h-5" />,
+    },
+    {
+      id: "planner",
+      label: "CMO Planner & Agents",
+      sublabel: "Daily–Annual plans & 5 agents",
+      icon: <Bot className="w-5 h-5" />,
+      badge: `${queuedActivities} Queued`,
+    },
+    {
+      id: "intel",
+      label: "Market & Competitor Intel",
+      sublabel: "Ontario trends & URL scanner",
+      icon: <Radar className="w-5 h-5" />,
+      badge: `${ontarioTrends.length} Signals`,
     },
     {
       id: "copilot",
@@ -65,11 +93,11 @@ export function Sidebar() {
               MindLC
             </span>
             <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30">
-              EdTech AI
+              Multi-Agent
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
-            Ontario Math Gr. 7–12 Command
+            Ontario Math Gr. 7–12 OS
           </p>
         </div>
       </div>
@@ -86,7 +114,7 @@ export function Sidebar() {
       </div>
 
       {/* Navigation Links */}
-      <div className="px-3 py-4 flex-1 space-y-1.5">
+      <div className="px-3 py-4 flex-1 space-y-1.5 overflow-y-auto">
         <div className="px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
           Command Workspace
         </div>
@@ -96,26 +124,26 @@ export function Sidebar() {
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
-              className={`w-full flex items-center justify-between px-3.5 py-3 rounded-xl text-left transition-all ${
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-left transition-all ${
                 isActive
                   ? "bg-teal-600 text-white shadow-md shadow-teal-950/40"
                   : "text-slate-300 hover:bg-slate-800/70 hover:text-white"
               }`}
             >
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 min-w-0">
                 <div
                   className={`${
                     isActive ? "text-white" : "text-teal-400"
-                  } transition-colors`}
+                  } transition-colors shrink-0`}
                 >
                   {item.icon}
                 </div>
-                <div>
-                  <div className="text-sm font-semibold leading-tight">
+                <div className="truncate">
+                  <div className="text-sm font-semibold leading-tight truncate">
                     {item.label}
                   </div>
                   <div
-                    className={`text-[11px] mt-0.5 ${
+                    className={`text-[11px] mt-0.5 truncate ${
                       isActive ? "text-teal-100" : "text-slate-400"
                     }`}
                   >
@@ -125,7 +153,7 @@ export function Sidebar() {
               </div>
               {item.badge && (
                 <span
-                  className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                  className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ml-1 ${
                     isActive
                       ? "bg-white/20 text-white"
                       : "bg-slate-800 text-slate-300"
@@ -157,7 +185,10 @@ export function Sidebar() {
               {currentUser.email}
             </div>
             <div className="text-[11px] text-slate-400">
-              Role: <span className="text-teal-400 font-medium">{currentUser.role}</span>
+              Role:{" "}
+              <span className="text-teal-400 font-medium">
+                {currentUser.role}
+              </span>
             </div>
           </div>
           <span className="w-2.5 h-2.5 rounded-full bg-teal-400 ring-4 ring-teal-400/20" />

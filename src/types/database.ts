@@ -42,6 +42,7 @@ export interface Asset {
   content: string;
   detail_level_used: DetailLevel;
   skill_used?: string;
+  agent_author?: string;
   updated_at?: string;
 }
 
@@ -55,16 +56,11 @@ export interface BrandPersona {
   geminiModel: string;
 }
 
-/**
- * Mandatory Output Protocol:
- * Strictly separates the generated marketing asset (for the Left Pane Asset Canvas)
- * from the Strategic Justification (for the Right Pane AI Chat Window).
- */
 export interface MandatoryOutputProtocol {
   protocolVersion: "1.0-MINDLC";
   targetPlatform: AssetPlatform;
   assetTitle: string;
-  marketingContent: string; // Strictly routed to Left Pane (Asset Canvas)
+  marketingContent: string;
   strategicJustification: {
     detailLevel: DetailLevel;
     levelLabel:
@@ -75,7 +71,7 @@ export interface MandatoryOutputProtocol {
     rationaleBody: string;
     frameworksApplied: string[];
     mentorshipTakeaway?: string;
-  }; // Strictly routed to Right Pane (Chat Feed)
+  };
 }
 
 export interface ChatMessage {
@@ -88,4 +84,102 @@ export interface ChatMessage {
   strategicJustification?: MandatoryOutputProtocol["strategicJustification"];
   linkedAssetId?: string;
   linkedPlatform?: AssetPlatform;
+}
+
+// ============================================================================
+// ONTARIO MARKET, COMPETITOR & EDUCATION TREND INTELLIGENCE TYPES
+// ============================================================================
+
+export interface OntarioTrendSignal {
+  id: string;
+  title: string;
+  category:
+    | "Ontario Academic Calendar"
+    | "EQAO & Ministry Policy"
+    | "OUAC University Admissions"
+    | "Parent Search & Social Signal";
+  urgency: "Critical Now" | "High (Next 14 Days)" | "Strategic Window";
+  affectedGrades: string;
+  courseCodes: string[];
+  parentPainSummary: string;
+  searchMomentum: string;
+  recommendedCmoAction: string;
+  recommendedAgentId: string;
+}
+
+export interface CompetitorProfile {
+  id: string;
+  name: string;
+  archetype:
+    | "Franchise Learning Centre"
+    | "1-on-1 Hourly Marketplace"
+    | "Generic AI Answer Solver"
+    | "Passive Self-Study Portal"
+    | "Live Scanned Competitor";
+  websiteUrl: string;
+  pricingModel: string;
+  theirPrimaryPitch: string;
+  ontarioParentComplaint: string;
+  structuralWeakness: string;
+  mindlcCounterWedge: string;
+  recommendedConversionPlay: string;
+  lastScannedAt: string;
+}
+
+// ============================================================================
+// SELF-GUIDED MULTI-AGENT MARKETING TEAM & MULTI-HORIZON PLANNER TYPES
+// ============================================================================
+
+export type PlanHorizon =
+  | "Daily"
+  | "Weekly"
+  | "Monthly"
+  | "Quarterly"
+  | "Annual";
+
+export type FunnelObjective =
+  | "Lead Generation"
+  | "Conversion Optimization"
+  | "Parent Retention & Referral";
+
+export interface MarketingAgent {
+  id: string;
+  codeName: string;
+  roleTitle: string;
+  specialty: string;
+  primarySkillName: string;
+  targetPlatform: AssetPlatform;
+  funnelFocus: FunnelObjective;
+  status: "Idle / Ready" | "Executing Task" | "Completed Sprint";
+  tasksCompletedCount: number;
+  conversionMetricOwned: string;
+}
+
+export interface PlannedActivity {
+  id: string;
+  horizon: PlanHorizon;
+  timeWindow: string;
+  title: string;
+  tacticalExecution: string; // Concrete, zero-jargon execution blueprint
+  deliverableSpec: string; // Exact output artifact produced
+  marketTrigger: string; // Ontario trend or competitor gap driving this activity
+  courseCodesTargeted: string[];
+  assignedAgentId: string;
+  skillName: string;
+  targetPlatform: AssetPlatform;
+  funnelObjective: FunnelObjective;
+  targetKpi: string;
+  status: "Queued" | "Completed";
+  outputAssetId?: string;
+  adjustedByCmo?: boolean;
+  cmoAdjustmentNote?: string;
+}
+
+export interface PlanQaExchange {
+  id: string;
+  timestamp: string;
+  cmoQuestion: string;
+  horizonAffected: PlanHorizon | "All Horizons";
+  strategistAnswer: string;
+  planAdjustmentsMade: string[];
 }

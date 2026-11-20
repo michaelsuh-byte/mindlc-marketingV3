@@ -8,19 +8,20 @@ import {
   Clock,
   FolderKanban,
   FileText,
-  BookOpen,
   ArrowRight,
   Plus,
   GraduationCap,
-  BrainCircuit,
-  Users,
+  Bot,
+  Radar,
 } from "lucide-react";
 
 export function DashboardView() {
   const {
     campaigns,
     assets,
-    skills,
+    agents,
+    ontarioTrends,
+    plannedActivities,
     brandPersona,
     activeCampaignId,
     setActiveCampaignId,
@@ -39,6 +40,9 @@ export function DashboardView() {
   };
 
   const approvedCount = campaigns.filter((c) => c.status === "Approved").length;
+  const completedTasks = plannedActivities.filter(
+    (a) => a.status === "Completed"
+  ).length;
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-8">
@@ -47,55 +51,84 @@ export function DashboardView() {
         <div className="space-y-2 max-w-2xl">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-teal-500/20 border border-teal-400/30 text-teal-300 text-xs font-semibold uppercase tracking-wider">
             <GraduationCap className="w-4 h-4" />
-            MindLC Ontario Math Grades 7–12 Growth Engine
+            MindLC Self-Guided Multi-Agent Marketing OS
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
-            AI Marketing Command Center & Mentorship Studio
+            AI Marketing Command Center & Multi-Horizon Planner
           </h1>
           <p className="text-sm text-slate-300 leading-relaxed">
-            {brandPersona.coreHook} Generate high-converting parent campaigns on
-            the left canvas while learning the underlying marketing psychology on
-            the right.
+            {brandPersona.coreHook} Monitor live Ontario education trends and
+            competitor weaknesses, adjust Daily–Annual plans via interactive Q&A,
+            and dispatch your 5 specialist agents.
           </p>
         </div>
         <div className="flex flex-wrap gap-3 shrink-0">
           <button
-            onClick={() => setActiveTab("copilot")}
+            onClick={() => setActiveTab("planner")}
             className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-sm shadow-md transition-all"
           >
-            <Sparkles className="w-4 h-4" />
-            Launch Campaign Co-Pilot
+            <Bot className="w-4 h-4" />
+            Open CMO Planner & 5 Agents
             <ArrowRight className="w-4 h-4" />
           </button>
           <button
-            onClick={() => setActiveTab("skills")}
+            onClick={() => setActiveTab("intel")}
             className="inline-flex items-center gap-2 px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold text-sm border border-slate-600 transition-all"
           >
-            <BookOpen className="w-4 h-4 text-teal-400" />
-            Manage Skill Library ({skills.length})
+            <Radar className="w-4 h-4 text-teal-400" />
+            Market & Competitor Intel
+          </button>
+          <button
+            onClick={() => setActiveTab("copilot")}
+            className="inline-flex items-center gap-2 px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold text-sm border border-slate-600 transition-all"
+          >
+            <Sparkles className="w-4 h-4 text-teal-400" />
+            Campaign Co-Pilot
           </button>
         </div>
       </div>
 
       {/* 4 KPI Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+        <div
+          onClick={() => setActiveTab("planner")}
+          className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm cursor-pointer hover:border-teal-500 transition"
+        >
           <div className="flex items-center justify-between text-slate-500 text-xs font-semibold uppercase tracking-wider">
-            <span>Active Campaigns</span>
-            <FolderKanban className="w-4 h-4 text-teal-600" />
+            <span>5-Horizon Agent Tasks</span>
+            <Bot className="w-4 h-4 text-teal-600" />
           </div>
           <div className="text-3xl font-extrabold text-slate-900 mt-2">
-            {campaigns.length}
+            {plannedActivities.length}
           </div>
           <div className="text-xs text-slate-500 mt-1">
             <span className="text-teal-700 font-semibold">
-              {approvedCount} Approved
+              {completedTasks} Completed
             </span>{" "}
-            · {campaigns.length - approvedCount} in Draft
+             across {agents.length} Specialist Agents
           </div>
         </div>
 
-        <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+        <div
+          onClick={() => setActiveTab("intel")}
+          className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm cursor-pointer hover:border-teal-500 transition"
+        >
+          <div className="flex items-center justify-between text-slate-500 text-xs font-semibold uppercase tracking-wider">
+            <span>Ontario Education Signals</span>
+            <Radar className="w-4 h-4 text-teal-600" />
+          </div>
+          <div className="text-3xl font-extrabold text-slate-900 mt-2">
+            {ontarioTrends.length}
+          </div>
+          <div className="text-xs text-slate-500 mt-1">
+            Midterms, EQAO MTH1W & OUAC Cutoffs
+          </div>
+        </div>
+
+        <div
+          onClick={() => setActiveTab("copilot")}
+          className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm cursor-pointer hover:border-teal-500 transition"
+        >
           <div className="flex items-center justify-between text-slate-500 text-xs font-semibold uppercase tracking-wider">
             <span>Generated Assets</span>
             <FileText className="w-4 h-4 text-teal-600" />
@@ -110,89 +143,17 @@ export function DashboardView() {
 
         <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between text-slate-500 text-xs font-semibold uppercase tracking-wider">
-            <span>Embedded AI Skills</span>
-            <BrainCircuit className="w-4 h-4 text-teal-600" />
+            <span>Active Campaigns</span>
+            <FolderKanban className="w-4 h-4 text-teal-600" />
           </div>
           <div className="text-3xl font-extrabold text-slate-900 mt-2">
-            {skills.length}
+            {campaigns.length}
           </div>
           <div className="text-xs text-slate-500 mt-1">
-            {skills.map((s) => s.skill_name).slice(0, 3).join(", ")}...
-          </div>
-        </div>
-
-        <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
-          <div className="flex items-center justify-between text-slate-500 text-xs font-semibold uppercase tracking-wider">
-            <span>Target ICP Focus</span>
-            <Users className="w-4 h-4 text-teal-600" />
-          </div>
-          <div className="text-lg font-bold text-slate-900 mt-2 leading-snug">
-            Ontario Parents (Gr. 7–12)
-          </div>
-          <div className="text-xs text-teal-700 font-medium mt-1">
-            MTH1W · MCR3U · MHF4U · MCV4U
-          </div>
-        </div>
-      </div>
-
-      {/* Visual Funnel & Ontario Curriculum Positioning Map */}
-      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div>
-            <h2 className="text-lg font-bold text-slate-900">
-              MindLC Dual-Value Architecture & Ontario Math Funnel
-            </h2>
-            <p className="text-xs text-slate-500">
-              How every marketing skill aligns our two core pillars with Ontario
-              parent conversion stages
-            </p>
-          </div>
-          <span className="text-xs font-semibold px-3 py-1 rounded-full bg-teal-50 text-teal-700 border border-teal-200">
-            Mandatory Output Protocol Active
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
-            <div className="text-xs font-bold uppercase tracking-wider text-teal-700">
-              Stage 1 · Attract (`ai-seo` & `social-content`)
-            </div>
-            <div className="font-bold text-slate-900 text-sm">
-              Capture Late-Night Ontario Math Searches & Parent Scrolls
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Targets high-anxiety moments: Grade 9 EQAO prep, Grade 11 MCR3U
-              Functions walls, and ChatGPT/Perplexity queries for Ontario math
-              help.
-            </p>
-          </div>
-
-          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
-            <div className="text-xs font-bold uppercase tracking-wider text-teal-700">
-              Stage 2 · Differentiate (`copywriting` & `cro`)
-            </div>
-            <div className="font-bold text-slate-900 text-sm">
-              Human Learning Manager + 24/7 Socratic AI
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Contrasts MindLC against $80/hr 1-hour weekly tutors (not there at
-              9 PM) and generic AI chatbots (which hand over answers instead of
-              teaching).
-            </p>
-          </div>
-
-          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
-            <div className="text-xs font-bold uppercase tracking-wider text-teal-700">
-              Stage 3 · Convert (`copy-editing` & Diagnostics)
-            </div>
-            <div className="font-bold text-slate-900 text-sm">
-              Free Ontario Math Diagnostic & Parent Strategy Consult
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Replaces high-friction &ldquo;Buy Tutoring Package&rdquo; buttons with a
-              zero-risk 20-minute curriculum diagnostic and personalized study
-              plan.
-            </p>
+            <span className="text-teal-700 font-semibold">
+              {approvedCount} Approved
+            </span>{" "}
+            · {campaigns.length - approvedCount} in Draft
           </div>
         </div>
       </div>
