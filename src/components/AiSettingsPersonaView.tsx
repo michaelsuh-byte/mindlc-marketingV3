@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { useMarketingStore } from "@/store/useMarketingStore";
-import { buildGeminiSystemInstruction } from "@/services/marketingAi";
+import { buildTierAwareSystemInstruction } from "@/services/marketingAi";
 import {
   Sliders,
   ShieldCheck,
@@ -18,8 +18,10 @@ export function AiSettingsPersonaView() {
     updateBrandPersona,
     skills,
     detailLevel,
-    activeBottleneckStage,
-    weeklyRealityLogs,
+    activeTierId,
+    tierWorkspaces,
+    vocVault,
+    setActiveTierId,
   } = useMarketingStore();
 
   const [formState, setFormState] = useState(brandPersona);
@@ -32,100 +34,114 @@ export function AiSettingsPersonaView() {
     setTimeout(() => setSavedBanner(false), 3000);
   };
 
-  const allQuotes = weeklyRealityLogs
-    .flatMap((l) => l.verbatim_parent_quotes)
-    .slice(0, 10);
-  const latestMetrics = weeklyRealityLogs[0]?.funnel_metrics;
+  const currentTierWs = tierWorkspaces[activeTierId];
+  const tierVocQuotes = vocVault
+    .filter((q) => q.tier_id === activeTierId || q.tier_id === "ALL")
+    .slice(0, 8);
 
-  const sampleCompiledPrompt = buildGeminiSystemInstruction(
-    skills[0],
-    formState,
+  const sampleCompiledPrompt = buildTierAwareSystemInstruction({
+    skill: skills[0],
+    tierWorkspace: currentTierWs,
     detailLevel,
-    activeBottleneckStage,
-    allQuotes,
-    latestMetrics
-  );
+    vocQuotesForTier: tierVocQuotes,
+  });
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-6">
-      <div>
-        <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-teal-700 mb-1">
-          <Sliders className="w-4 h-4" />
-          Page 3 · Persistent Brand Memory, VoC Context Cache &amp; Schema
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-indigo-700 mb-1">
+            <Sliders className="w-4 h-4" />
+            3-Tier × 3-Stage Isolated Context Builder &amp; Schema
+          </div>
+          <h1 className="text-2xl font-extrabold text-slate-900">
+            Tier-Aware Agent System Prompt &amp; Cross-Tier Tone Guardrails
+          </h1>
+          <p className="text-sm text-slate-600">
+            Inspect how switching between `TIER_1` (Self-Coach), `TIER_2`
+            (Managed Hybrid), and `TIER_3` (Prime 1:1) dynamically isolates the
+            Agent&apos;s system instruction, funnel metrics, and top 8 VoC
+            quotes.
+          </p>
         </div>
-        <h1 className="text-2xl font-extrabold text-slate-900">
-          AI Settings, MindLC Persona ($139 CAD/mo Tier 2) &amp; Safeguard Schema
-        </h1>
-        <p className="text-sm text-slate-600">
-          Inspect how the latest 10 `verbatim_parent_quotes` from
-          `WeeklyRealityLog`, computed conversion rates, and the active
-          `ActiveBottleneckStage` are context-cached into the Marketing
-          Agent&apos;s system instruction.
-        </p>
+
+        <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200">
+          {(["TIER_1", "TIER_2", "TIER_3"] as const).map((tid) => (
+            <button
+              key={tid}
+              type="button"
+              onClick={() => setActiveTierId(tid)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                activeTierId === tid
+                  ? "bg-slate-900 text-white"
+                  : "text-slate-600 hover:bg-slate-100"
+              }`}
+            >
+              {tierWorkspaces[tid].tier_short_name}
+            </button>
+          ))}
+        </div>
       </div>
 
       {savedBanner && (
         <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-semibold flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-          Saved MindLC Persona! All future Campaign Co-Pilot generations will
-          automatically enforce these guardrails.
+          Saved MindLC Persona &amp; 3-Tier Guardrails!
         </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left 7 Cols: Editable Brand Persona Form */}
+        {/* Left 7 Cols: Active Tier Profile & Brand Persona Form */}
         <form
           onSubmit={handleSave}
           className="lg:col-span-7 bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4"
         >
           <div className="flex items-center justify-between border-b border-slate-200 pb-3">
             <div className="flex items-center gap-2">
-              <ShieldCheck className="w-5 h-5 text-teal-600" />
+              <ShieldCheck className="w-5 h-5 text-indigo-600" />
               <h2 className="font-bold text-slate-900 text-base">
-                MindLC Core Positioning &amp; Tier 2 Managed Hybrid Offer
+                Active Tier Isolation Profile: {currentTierWs.tier_name}
               </h2>
             </div>
-            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200">
-              Context-Cached
+            <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+              {currentTierWs.price_label}
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                Company Name
-              </label>
-              <input
-                type="text"
-                value={formState.companyName}
-                onChange={(e) =>
-                  setFormState({ ...formState, companyName: e.target.value })
-                }
-                className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500"
-              />
+              <strong className="text-slate-900">Tier Offer Summary:</strong>{" "}
+              <span className="text-slate-700">
+                {currentTierWs.offer_summary}
+              </span>
             </div>
-
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                Offer Plan &amp; Price Point
-              </label>
-              <input
-                type="text"
-                value={formState.planNameAndPrice}
-                onChange={(e) =>
-                  setFormState({
-                    ...formState,
-                    planNameAndPrice: e.target.value,
-                  })
-                }
-                className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-bold text-teal-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
-              />
+              <strong className="text-slate-900">Tier Target Persona:</strong>{" "}
+              <span className="text-slate-700">
+                {currentTierWs.target_persona}
+              </span>
+            </div>
+            <div>
+              <strong className="text-rose-800">
+                Cross-Tier Tone Bleed Guardrail:
+              </strong>{" "}
+              <span className="text-rose-900 font-medium">
+                {currentTierWs.tone_guardrail}
+              </span>
+            </div>
+            <div>
+              <strong className="text-slate-900">
+                Tier-Specific Funnel Steps:
+              </strong>{" "}
+              <span className="font-mono text-indigo-700">
+                {currentTierWs.funnel_labels.join(" → ")}
+              </span>
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-teal-700 mb-1">
-              Core Positioning Hook (First 100 Paid Students Guardrail)
+            <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+              Global MindLC 3-Tier Architecture Summary
             </label>
             <textarea
               rows={3}
@@ -133,27 +149,13 @@ export function AiSettingsPersonaView() {
               onChange={(e) =>
                 setFormState({ ...formState, coreHook: e.target.value })
               }
-              className="w-full p-3.5 rounded-xl border-2 border-teal-500/50 bg-teal-50/30 text-sm font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+              className="w-full p-3.5 rounded-xl border border-slate-300 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
 
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-              Target Audience (Ontario Grades 9–12 STEM Parents)
-            </label>
-            <textarea
-              rows={2}
-              value={formState.targetAudience}
-              onChange={(e) =>
-                setFormState({ ...formState, targetAudience: e.target.value })
-              }
-              className="w-full p-3 rounded-xl border border-slate-300 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-              Ontario Ministry Curriculum Focus &amp; Course Codes
+              Ontario Ministry Curriculum Focus &amp; Growing Success (K/T/C/A)
             </label>
             <textarea
               rows={2}
@@ -161,24 +163,7 @@ export function AiSettingsPersonaView() {
               onChange={(e) =>
                 setFormState({ ...formState, curriculumFocus: e.target.value })
               }
-              className="w-full p-3 rounded-xl border border-slate-300 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-              Parent Objections &amp; 30-Day Active-Habit Guarantee
-            </label>
-            <textarea
-              rows={3}
-              value={formState.antiPersonaObjections}
-              onChange={(e) =>
-                setFormState({
-                  ...formState,
-                  antiPersonaObjections: e.target.value,
-                })
-              }
-              className="w-full p-3 rounded-xl border border-slate-300 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
+              className="w-full p-3 rounded-xl border border-slate-300 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
 
@@ -187,25 +172,25 @@ export function AiSettingsPersonaView() {
               type="submit"
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm shadow-sm transition"
             >
-              <Save className="w-4 h-4 text-teal-400" />
-              Save Persona &amp; Guardrails
+              <Save className="w-4 h-4 text-indigo-400" />
+              Save 3-Tier Persona Settings
             </button>
           </div>
         </form>
 
-        {/* Right 5 Cols: Compiled Context-Cached Gemini System Prompt + Schema */}
+        {/* Right 5 Cols: Compiled Tier-Isolated Gemini System Prompt */}
         <div className="lg:col-span-5 space-y-6">
           <div className="bg-slate-900 text-slate-100 rounded-2xl p-5 border border-slate-800 space-y-3">
             <div className="flex items-center justify-between">
-              <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-teal-400">
+              <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-indigo-400">
                 <Code2 className="w-4 h-4" />
-                Context-Cached System Prompt (`WeeklyRealityLog` + Stage Lock)
+                Compiled Prompt (`{activeTierId}` · `{currentTierWs.active_stage}`)
               </span>
               <span className="text-[11px] font-mono text-slate-400">
-                services/marketingAi.ts
+                Zero Cross-Tier Bleed
               </span>
             </div>
-            <pre className="text-[11px] font-mono text-slate-300 bg-slate-950/80 p-3.5 rounded-xl border border-slate-800 overflow-x-auto whitespace-pre-wrap max-h-80">
+            <pre className="text-[11px] font-mono text-slate-300 bg-slate-950/80 p-3.5 rounded-xl border border-slate-800 overflow-x-auto whitespace-pre-wrap max-h-96">
               {sampleCompiledPrompt}
             </pre>
           </div>
@@ -213,38 +198,29 @@ export function AiSettingsPersonaView() {
           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-3">
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700">
-                <Database className="w-4 h-4 text-teal-600" />
-                PostgreSQL Schema (`supabase/schema.sql`)
+                <Database className="w-4 h-4 text-indigo-600" />
+                3-Tier × 3-Stage Isolation Model
               </span>
-              <span className="text-[11px] font-semibold text-teal-700">
-                5 Core Tables
+              <span className="text-[11px] font-semibold text-indigo-700">
+                9 Independent Stage Cells
               </span>
             </div>
             <ul className="text-xs text-slate-600 space-y-2 font-mono bg-slate-50 p-3.5 rounded-xl border border-slate-200">
               <li>
-                <strong className="text-slate-900">users:</strong> id (PK),
-                email, role (&apos;Admin&apos;)
+                <strong className="text-slate-900">TIER_1 ($39/mo):</strong>{" "}
+                S1 (0–50) · S2 (51–150) · S3 (151–300+)
               </li>
               <li>
-                <strong className="text-slate-900">marketing_skills:</strong> id
-                (PK), skill_name, system_prompt
+                <strong className="text-slate-900">TIER_2 ($139/mo):</strong>{" "}
+                S1 (0–25) · S2 (26–60) · S3 (61–100)
               </li>
               <li>
-                <strong className="text-slate-900">campaigns:</strong> id (PK),
-                title, status (&apos;Draft&apos; | &apos;Approved&apos;),
-                created_at
+                <strong className="text-slate-900">TIER_3 ($349/mo):</strong>{" "}
+                S1 (0–5) · S2 (6–15) · S3 (16–30)
               </li>
               <li>
-                <strong className="text-slate-900">
-                  weekly_reality_logs:
-                </strong>{" "}
-                id (PK), week_start_date, funnel_metrics (JSONB),
-                verbatim_parent_quotes (JSONB), top_winning_touchpoint
-              </li>
-              <li>
-                <strong className="text-slate-900">assets:</strong> id (PK),
-                campaign_id (FK), platform, content, detail_level_used (1–3),
-                bottleneck_stage, hitl_state, proposal_schema (JSONB)
+                <strong className="text-slate-900">Shared VoC Vault:</strong>{" "}
+                Tagged TIER_1 | TIER_2 | TIER_3 | ALL
               </li>
             </ul>
           </div>

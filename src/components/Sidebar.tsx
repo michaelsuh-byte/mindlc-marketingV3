@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { useMarketingStore, NavigationTab } from "@/store/useMarketingStore";
-import { Asset, VoCContextTag } from "@/types/database";
+import { Asset, VoCContextTag, VoCTierTag } from "@/types/database";
 import {
   Plus,
   Quote,
@@ -32,7 +32,7 @@ const TAG_META: { tag: VoCContextTag; label: string; badgeClass: string }[] = [
   },
   {
     tag: "price",
-    label: "Price ($139 vs $380)",
+    label: "Price & Value",
     badgeClass: "bg-emerald-50 text-emerald-800 border-emerald-200",
   },
   {
@@ -51,11 +51,13 @@ export function Sidebar() {
   const {
     activeTab,
     setActiveTab,
+    activeTierId,
+    tierWorkspaces,
+    vocVault,
     assets,
     selectedProposalId,
     setSelectedProposalId,
     realityGateStatus,
-    weeklyRealityLogs,
     isVocVaultOpen,
     setVocVaultOpen,
     setRealityGateModalOpen,
@@ -66,10 +68,14 @@ export function Sidebar() {
 
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isArchivedExpanded, setIsArchivedExpanded] = useState(false);
+  const [vocTierFilter, setVocTierFilter] = useState<VoCTierTag | "ACTIVE_PLUS_ALL">(
+    "ACTIVE_PLUS_ALL"
+  );
 
+  const currentTierWs = tierWorkspaces[activeTierId];
   const isLocked = realityGateStatus === "LOCKED";
 
-  // Group proposals into the 4 prioritized urgency buckets
+  // Group active tier's proposals into the 4 prioritized urgency buckets
   const killTriggered = assets.filter(
     (a) => a.hitl_state === "KILLED_BY_STOP_LOSS"
   );
@@ -83,9 +89,13 @@ export function Sidebar() {
   );
   const archivedKilled = assets.filter((a) => a.hitl_state === "ARCHIVED");
 
-  const allVocQuotes = weeklyRealityLogs.flatMap(
-    (l) => l.verbatim_parent_quotes
-  );
+  const filteredVocQuotes = vocVault.filter((q) => {
+    if (vocTierFilter === "ACTIVE_PLUS_ALL") {
+      return q.tier_id === activeTierId || q.tier_id === "ALL";
+    }
+    if (vocTierFilter === "ALL") return true;
+    return q.tier_id === vocTierFilter;
+  });
 
   const handleNewProposalClick = async () => {
     if (isLocked) {
@@ -94,11 +104,11 @@ export function Sidebar() {
     }
     setActiveTab("copilot");
     const defaultPrompt =
-      activeBottleneckStage === "STAGE_1_CONVERSION"
-        ? "Draft a new Stage 1 10-minute parent diagnostic debrief close script and K/T/C/A report summary for MHF4U & SBI3U parents."
-        : activeBottleneckStage === "STAGE_2_REFERRAL_DIAG"
-        ? "Draft a Week 4 unit-test win parent referral flow and MHF4U/SBI3U seminar invitation."
-        : "Draft a GTA Mississauga & Oakville parent Meta ad creative for our $139 CAD/mo Tier 2 Managed Hybrid Plan.";
+      activeTierId === "TIER_1"
+        ? `Draft a new ${currentTierWs.tier_short_name} (${activeBottleneckStage}) self-serve onboarding and Socratic voice + LaTeX HUD conversion asset.`
+        : activeTierId === "TIER_2"
+        ? `Draft a new ${currentTierWs.tier_short_name} (${activeBottleneckStage}) Growing Success K/T/C/A parent debrief and Learning Manager close asset.`
+        : `Draft a new ${currentTierWs.tier_short_name} (${activeBottleneckStage}) 1:1 executive parent consultation and Flag A upgrade asset.`;
     await sendCopilotCommand(defaultPrompt, false, true);
   };
 
@@ -143,21 +153,23 @@ export function Sidebar() {
             {channelLabel}
           </span>
           <div className="flex items-center gap-1.5 shrink-0">
+            <span className="text-[10px] font-mono font-semibold text-indigo-700">
+              {item.stage_id || "STAGE_1"}
+            </span>
             <span className="text-[10px] font-mono font-semibold text-slate-400">
               v{verCount}
             </span>
-            {item.is_sample && (
-              <span className="text-[9px] uppercase px-1.5 py-0.2 rounded bg-slate-100 text-slate-500">
-                Sample
-              </span>
-            )}
           </div>
         </div>
       </button>
     );
   };
 
-  const navTabs: { id: NavigationTab; label: string; icon: React.ReactNode }[] = [
+  const navTabs: {
+    id: NavigationTab;
+    label: string;
+    icon: React.ReactNode;
+  }[] = [
     {
       id: "copilot",
       label: "Micro Cockpit",
@@ -219,7 +231,7 @@ export function Sidebar() {
 
         <button
           onClick={() => setVocVaultOpen(true)}
-          title="Open VoC Verbatim Vault Drawer"
+          title="Open Shared VoC Verbatim Vault Drawer"
           className="p-2 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200"
         >
           <Quote className="w-4 h-4" />
@@ -230,9 +242,6 @@ export function Sidebar() {
 
   return (
     <>
-      {/* =====================================================================
-          LEVEL 2: MESO PIPELINE & VOC RAIL (Left Sidebar — Width 296px)
-          ===================================================================== */}
       <aside className="w-[296px] bg-slate-100/80 border-r border-slate-200 flex flex-col shrink-0 select-none h-[calc(100vh-72px)] sticky top-[72px]">
         {/* Top Module Switcher + Collapse Toggle */}
         <div className="px-3.5 pt-3 pb-2 border-b border-slate-200 bg-white flex items-center justify-between gap-1">
@@ -262,8 +271,17 @@ export function Sidebar() {
           </button>
         </div>
 
-        {/* 1. Primary Action: + New Proposal Button (Data-Locked when Reality Gate is LOCKED) */}
-        <div className="p-3.5 border-b border-slate-200 bg-white">
+        {/* Active Tier Workspace Header + Primary Action: + New Proposal */}
+        <div className="p-3.5 border-b border-slate-200 bg-white space-y-2">
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="font-extrabold text-slate-900">
+              {currentTierWs.tier_short_name} Queue
+            </span>
+            <span className="font-mono font-semibold text-indigo-700">
+              {currentTierWs.price_label}
+            </span>
+          </div>
+
           <button
             type="button"
             onClick={handleNewProposalClick}
@@ -271,7 +289,7 @@ export function Sidebar() {
             title={
               isLocked
                 ? "Complete Weekly Reality Gate first"
-                : `Draft a new ${activeBottleneckStage} proposal`
+                : `Draft a new ${currentTierWs.tier_short_name} (${activeBottleneckStage}) proposal`
             }
             className={`w-full py-2.5 px-3.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition ${
               isLocked
@@ -288,32 +306,29 @@ export function Sidebar() {
               <>
                 <Plus className="w-4 h-4" />
                 <span>
-                  {isGenerating ? "Drafting Proposal..." : "+ New Proposal"}
+                  {isGenerating
+                    ? "Drafting..."
+                    : `+ New ${currentTierWs.tier_short_name} Proposal`}
                 </span>
               </>
             )}
           </button>
-          {isLocked && (
-            <div className="text-[10px] text-amber-800 text-center mt-1.5 font-medium">
-              Complete Weekly Reality Gate first to unlock new proposals
-            </div>
-          )}
         </div>
 
-        {/* 2. Prioritized Proposal Queue (Scrollable Middle Rail) */}
+        {/* Prioritized Proposal Queue Scoped to Active Tier */}
         <div className="flex-1 overflow-y-auto p-3.5 space-y-5">
-          {/* 🔴 Group 1: Kill-Criteria Triggered (Pinned to Top) */}
+          {/* 🔴 Group 1: Kill-Criteria Triggered */}
           <div className="space-y-2">
             <div className="flex items-center justify-between px-1">
-              <span className="text-[11px] font-extrabold uppercase tracking-wider text-rose-800 flex items-center gap-1.5">
-                <span>🔴 Kill-Criteria Triggered</span>
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-rose-800">
+                🔴 Kill-Criteria Triggered
               </span>
               <span className="text-[11px] font-bold px-2 py-0.2 rounded-full bg-rose-100 text-rose-800 border border-rose-200 tabular-nums">
                 {killTriggered.length}
               </span>
             </div>
             {killTriggered.length === 0 ? (
-              <div className="text-[11px] text-slate-400 px-2 py-1.5">
+              <div className="text-[11px] text-slate-400 px-2 py-1">
                 Zero live stop-loss breaches
               </div>
             ) : (
@@ -332,15 +347,15 @@ export function Sidebar() {
           {/* 🟡 Group 2: Awaiting CMO Decision */}
           <div className="space-y-2">
             <div className="flex items-center justify-between px-1">
-              <span className="text-[11px] font-extrabold uppercase tracking-wider text-amber-900 flex items-center gap-1.5">
-                <span>🟡 Awaiting CMO Decision</span>
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-amber-900">
+                🟡 Awaiting CMO Decision
               </span>
               <span className="text-[11px] font-bold px-2 py-0.2 rounded-full bg-amber-100 text-amber-900 border border-amber-200 tabular-nums">
                 {awaitingDecision.length}
               </span>
             </div>
             {awaitingDecision.length === 0 ? (
-              <div className="text-[11px] text-slate-400 px-2 py-1.5">
+              <div className="text-[11px] text-slate-400 px-2 py-1">
                 All drafts reviewed
               </div>
             ) : (
@@ -359,15 +374,15 @@ export function Sidebar() {
           {/* 🟢 Group 3: Approved / Live */}
           <div className="space-y-2">
             <div className="flex items-center justify-between px-1">
-              <span className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
-                <span>🟢 Approved / Live</span>
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-800">
+                🟢 Approved / Live
               </span>
               <span className="text-[11px] font-bold px-2 py-0.2 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 tabular-nums">
                 {approvedLive.length}
               </span>
             </div>
             {approvedLive.length === 0 ? (
-              <div className="text-[11px] text-slate-400 px-2 py-1.5">
+              <div className="text-[11px] text-slate-400 px-2 py-1">
                 No approved assets live yet
               </div>
             ) : (
@@ -383,7 +398,7 @@ export function Sidebar() {
             )}
           </div>
 
-          {/* ⚪ Group 4: Archived / Killed (Collapsible History) */}
+          {/* ⚪ Group 4: Archived / Killed */}
           <div className="space-y-2 pt-1 border-t border-slate-200">
             <button
               type="button"
@@ -417,7 +432,7 @@ export function Sidebar() {
           </div>
         </div>
 
-        {/* 3. VoC Verbatim Vault Drawer Toggle (Pinned to Bottom of Sidebar) */}
+        {/* Shared VoC Verbatim Vault Drawer Toggle (Pinned Bottom) */}
         <div className="p-3.5 border-t border-slate-200 bg-white">
           <button
             type="button"
@@ -430,10 +445,10 @@ export function Sidebar() {
               </div>
               <div>
                 <div className="text-xs font-bold text-slate-900 group-hover:text-indigo-950">
-                  VoC Verbatim Vault
+                  Shared VoC Vault
                 </div>
                 <div className="text-[11px] text-slate-500 tabular-nums">
-                  {allVocQuotes.length} Parent Quotes by Tag
+                  {vocVault.length} Quotes (Tagged T1/T2/T3/ALL)
                 </div>
               </div>
             </div>
@@ -443,7 +458,7 @@ export function Sidebar() {
       </aside>
 
       {/* =====================================================================
-          SLIDE-OVER DRAWER: VOC VERBATIM VAULT
+          SLIDE-OVER DRAWER: SHARED VOC VERBATIM VAULT WITH TIER TAGGING
           ===================================================================== */}
       {isVocVaultOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-2xs flex justify-start">
@@ -453,10 +468,11 @@ export function Sidebar() {
                 <Quote className="w-5 h-5 text-indigo-400" />
                 <div>
                   <h2 className="font-bold text-sm">
-                    VoC Verbatim Vault (Ontario STEM Parents)
+                    Shared VoC Verbatim Vault (`TIER_1` · `TIER_2` · `TIER_3` · `ALL`)
                   </h2>
                   <p className="text-[11px] text-slate-400">
-                    Grouped by objection tag · Context-cached into AI proposals
+                    Insights tagged `ALL` or `{activeTierId}` auto-inject into{" "}
+                    {currentTierWs.tier_short_name}
                   </p>
                 </div>
               </div>
@@ -468,9 +484,38 @@ export function Sidebar() {
               </button>
             </div>
 
+            {/* Tier Scope Filter Bar */}
+            <div className="px-5 py-2.5 bg-slate-50 border-b border-slate-200 flex flex-wrap gap-1.5">
+              {(
+                [
+                  {
+                    id: "ACTIVE_PLUS_ALL",
+                    label: `Active (${activeTierId} + ALL)`,
+                  },
+                  { id: "ALL", label: "All Quotes" },
+                  { id: "TIER_1", label: "T1 Self-Coach" },
+                  { id: "TIER_2", label: "T2 Hybrid" },
+                  { id: "TIER_3", label: "T3 Prime 1:1" },
+                ] as const
+              ).map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setVocTierFilter(f.id)}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition ${
+                    vocTierFilter === f.id
+                      ? "bg-indigo-600 text-white"
+                      : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+
             <div className="flex-1 overflow-y-auto p-5 space-y-5">
               {TAG_META.map((group) => {
-                const groupQuotes = allVocQuotes.filter(
+                const groupQuotes = filteredVocQuotes.filter(
                   (q) => q.context_tag === group.tag
                 );
                 if (groupQuotes.length === 0) return null;
@@ -491,7 +536,12 @@ export function Sidebar() {
 
                     <div className="space-y-2">
                       {groupQuotes.map((q) => {
-                        const addressedCount = assets.filter((a) =>
+                        const allProposals = [
+                          ...tierWorkspaces.TIER_1.proposals,
+                          ...tierWorkspaces.TIER_2.proposals,
+                          ...tierWorkspaces.TIER_3.proposals,
+                        ];
+                        const addressedCount = allProposals.filter((a) =>
                           a.proposal_schema?.cited_voc_quotes?.some((c) =>
                             c.includes(q.id)
                           )
@@ -503,9 +553,14 @@ export function Sidebar() {
                             className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5 text-xs"
                           >
                             <div className="flex items-center justify-between text-[11px]">
-                              <span className="font-mono font-bold text-indigo-700">
-                                [{q.id}]
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono font-bold text-indigo-700">
+                                  [{q.id}]
+                                </span>
+                                <span className="px-1.5 py-0.2 rounded bg-slate-200 text-slate-700 font-mono text-[10px] font-bold">
+                                  tier: {q.tier_id}
+                                </span>
+                              </div>
                               <span className="font-semibold text-emerald-700 tabular-nums">
                                 Addressed by {addressedCount} proposal
                                 {addressedCount === 1 ? "" : "s"}
@@ -523,7 +578,7 @@ export function Sidebar() {
               })}
             </div>
 
-            <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
+            <div className="p-4 border-t border-slate-200 bg-slate-50">
               <button
                 onClick={() => {
                   setVocVaultOpen(false);

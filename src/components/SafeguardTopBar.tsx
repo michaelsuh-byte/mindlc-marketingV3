@@ -2,11 +2,13 @@
 
 import React, { useState, useEffect } from "react";
 import { useMarketingStore, NavigationTab } from "@/store/useMarketingStore";
+import { computeFunnelRates } from "@/services/marketingAi";
 import {
-  BOTTLENECK_STAGE_CONFIGS,
-  computeFunnelRates,
-} from "@/services/marketingAi";
-import { VoCContextTag } from "@/types/database";
+  StageId,
+  TierId,
+  VoCContextTag,
+  VoCTierTag,
+} from "@/types/database";
 import {
   Lock,
   Unlock,
@@ -22,6 +24,7 @@ import {
   Radar,
   BookOpen,
   Sliders,
+  Edit3,
 } from "lucide-react";
 
 const CONTEXT_TAGS: { id: VoCContextTag; label: string }[] = [
@@ -32,10 +35,21 @@ const CONTEXT_TAGS: { id: VoCContextTag; label: string }[] = [
   { id: "student_motivation", label: "Student Motivation" },
 ];
 
+const TIER_PILLS: { id: TierId; short: string; price: string }[] = [
+  { id: "TIER_1", short: "T1 · Self-Coach", price: "$39/mo" },
+  { id: "TIER_2", short: "T2 · Managed Hybrid", price: "$139/mo" },
+  { id: "TIER_3", short: "T3 · Prime 1:1", price: "$349/mo" },
+];
+
 export function SafeguardTopBar() {
   const {
     activeTab,
     setActiveTab,
+    activeTierId,
+    tierWorkspaces,
+    setActiveTierId,
+    setActiveStageOverride,
+    updateTierStageGoal,
     realityGateStatus,
     pilotWeek0Used,
     weeklyRealityLogs,
@@ -53,7 +67,9 @@ export function SafeguardTopBar() {
   } = useMarketingStore();
 
   const [isBottleneckPopoverOpen, setIsBottleneckPopoverOpen] = useState(false);
+  const [editingStageId, setEditingStageId] = useState<StageId | null>(null);
 
+  const currentTierWs = tierWorkspaces[activeTierId];
   const latestLog = weeklyRealityLogs[0];
   const metrics = latestLog?.funnel_metrics || {
     reach_or_contacts: 64,
@@ -62,17 +78,27 @@ export function SafeguardTopBar() {
     paid_conversions: 2,
   };
   const rates = computeFunnelRates(metrics);
-  const stageCfg = BOTTLENECK_STAGE_CONFIGS[activeBottleneckStage];
+  const stageGoal = currentTierWs.stage_goals[activeBottleneckStage];
+  const [lbl1, lbl2, lbl3, lbl4] = currentTierWs.funnel_labels;
 
-  // Identify the single lowest conversion rate in the 3 transitions to highlight in Amber/Rose
+  // Stage Goal Inline Editor State
+  const [editKpiName, setEditKpiName] = useState(stageGoal.primary_kpi_name);
+  const [editKpiTargetPct, setEditKpiTargetPct] = useState(
+    stageGoal.primary_kpi_target_pct
+  );
+  const [editTargetPaid, setEditTargetPaid] = useState(
+    stageGoal.target_paid_count
+  );
+
+  // Identify lowest conversion step in the active tier's funnel
   const stepRates = [
-    { key: "booked", pct: rates.contactToBookedPct, target: 25 },
-    { key: "done", pct: rates.bookedToCompletedPct, target: 75 },
-    { key: "paid", pct: rates.completedToPaidPct, target: 25 },
+    { key: "booked", pct: rates.contactToBookedPct },
+    { key: "done", pct: rates.bookedToCompletedPct },
+    { key: "paid", pct: rates.completedToPaidPct },
   ];
   const lowestStepKey = [...stepRates].sort((a, b) => a.pct - b.pct)[0]?.key;
 
-  // 60-Second Weekly Reality Gate Modal Form State
+  // 60-Second Weekly Reality Gate Modal Form State (Syncs when activeTierId changes)
   const [weekStart, setWeekStart] = useState(
     new Date().toISOString().split("T")[0]
   );
@@ -81,26 +107,42 @@ export function SafeguardTopBar() {
   const [completed, setCompleted] = useState(metrics.diag_completed);
   const [paid, setPaid] = useState(metrics.paid_conversions);
   const [touchpoint, setTouchpoint] = useState(
-    latestLog?.top_winning_touchpoint ||
-      "10-min Zoom parent debrief screen-sharing the student's timestamped Socratic stall on Question 4 (MHF4U)"
+    latestLog?.top_winning_touchpoint || ""
   );
+  const [alsoUnlockOtherTiers, setAlsoUnlockOtherTiers] = useState(false);
   const [quotes, setQuotes] = useState<
-    { quote_text: string; context_tag: VoCContextTag }[]
+    {
+      quote_text: string;
+      context_tag: VoCContextTag;
+      tier_id: VoCTierTag;
+    }[]
   >([
     {
       quote_text:
         "My son already uses ChatGPT to finish homework in 5 minutes and then gets 56% on his MHF4U Advanced Functions unit test.",
       context_tag: "ai_cheating",
+      tier_id: activeTierId,
     },
     {
       quote_text:
-        "Her teacher marks Ontario K/T/C/A Thinking and Application questions strictly—generic tutoring worksheets don't match Grade 11 SBI3U or MCR3U tests.",
+        "Her teacher marks Ontario Growing Success (K/T/C/A) Thinking and Application questions strictly—generic tutoring worksheets don't match Grade 11 SBI3U or MCR3U tests.",
       context_tag: "curriculum",
+      tier_id: "ALL",
     },
   ]);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Live modal conversion % calculation as the user types
+  useEffect(() => {
+    const log = currentTierWs.weekly_reality_logs[0];
+    if (log) {
+      setReach(log.funnel_metrics.reach_or_contacts);
+      setBooked(log.funnel_metrics.diag_booked);
+      setCompleted(log.funnel_metrics.diag_completed);
+      setPaid(log.funnel_metrics.paid_conversions);
+      setTouchpoint(log.top_winning_touchpoint);
+    }
+  }, [activeTierId, currentTierWs.weekly_reality_logs]);
+
   const modalLiveRates = computeFunnelRates({
     reach_or_contacts: Number(reach) || 0,
     diag_booked: Number(booked) || 0,
@@ -108,7 +150,6 @@ export function SafeguardTopBar() {
     paid_conversions: Number(paid) || 0,
   });
 
-  // Esc key handler to close modals & popovers
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -120,7 +161,6 @@ export function SafeguardTopBar() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [setRealityGateModalOpen]);
 
-  // Auto-dismiss diagnostic toast after 7 seconds
   useEffect(() => {
     if (!diagnosticToast) return;
     const t = setTimeout(() => clearDiagnosticToast(), 7000);
@@ -151,73 +191,155 @@ export function SafeguardTopBar() {
       },
       verbatim_parent_quotes: validQuotes,
       top_winning_touchpoint: touchpoint,
+      alsoUnlockTiers: alsoUnlockOtherTiers
+        ? ["TIER_1", "TIER_2", "TIER_3"]
+        : [activeTierId],
     });
+  };
+
+  const handleOpenStageGoalEdit = (st: StageId) => {
+    const g = currentTierWs.stage_goals[st];
+    setEditingStageId(st);
+    setEditKpiName(g.primary_kpi_name);
+    setEditKpiTargetPct(g.primary_kpi_target_pct);
+    setEditTargetPaid(g.target_paid_count);
+  };
+
+  const handleSaveStageGoalEdit = (st: StageId) => {
+    updateTierStageGoal(activeTierId, st, {
+      primary_kpi_name: editKpiName,
+      primary_kpi_target_pct: Number(editKpiTargetPct),
+      target_paid_count: Number(editTargetPaid),
+      short_badge: `${st.replace("_", " ")}: ${editKpiName} ≥ ${editKpiTargetPct}%`,
+    });
+    setEditingStageId(null);
   };
 
   const isLocked = realityGateStatus === "LOCKED";
 
-  // Segmented progress bar calculation across 0->25 (Stage 1), 26->60 (Stage 2), 61->100 (Stage 3)
-  const seg1Pct = Math.min(100, Math.round((paidStudentCount / 25) * 100));
+  // 3-Segment Milestone Progress Bar dynamically scaled to the active tier's Stage 1/2/3 targets!
+  const s1Max = currentTierWs.stage_goals.STAGE_1.target_paid_count;
+  const s2Max = currentTierWs.stage_goals.STAGE_2.target_paid_count;
+  const s3Max = currentTierWs.stage_goals.STAGE_3.target_paid_count;
+
+  const seg1Pct = Math.min(100, Math.round((paidStudentCount / s1Max) * 100));
   const seg2Pct =
-    paidStudentCount > 25
-      ? Math.min(100, Math.round(((paidStudentCount - 25) / 35) * 100))
+    paidStudentCount > s1Max
+      ? Math.min(
+          100,
+          Math.round(((paidStudentCount - s1Max) / (s2Max - s1Max)) * 100)
+        )
       : 0;
   const seg3Pct =
-    paidStudentCount > 60
-      ? Math.min(100, Math.round(((paidStudentCount - 60) / 40) * 100))
+    paidStudentCount > s2Max
+      ? Math.min(
+          100,
+          Math.round(((paidStudentCount - s2Max) / (s3Max - s2Max)) * 100)
+        )
       : 0;
 
-  const secondaryViews: { id: NavigationTab; label: string; icon: React.ReactNode }[] = [
-    { id: "copilot", label: "CMO Cockpit", icon: <Layers className="w-3.5 h-3.5" /> },
-    { id: "planner", label: "5-Horizon Planner & Agents", icon: <Bot className="w-3.5 h-3.5" /> },
-    { id: "intel", label: "Market & Competitor Intel", icon: <Radar className="w-3.5 h-3.5" /> },
-    { id: "skills", label: "Skill Library", icon: <BookOpen className="w-3.5 h-3.5" /> },
-    { id: "settings", label: "Persona & Schema", icon: <Sliders className="w-3.5 h-3.5" /> },
+  const secondaryViews: {
+    id: NavigationTab;
+    label: string;
+    icon: React.ReactNode;
+  }[] = [
+    {
+      id: "copilot",
+      label: "CMO Cockpit",
+      icon: <Layers className="w-3.5 h-3.5" />,
+    },
+    {
+      id: "planner",
+      label: "5-Horizon Planner",
+      icon: <Bot className="w-3.5 h-3.5" />,
+    },
+    {
+      id: "intel",
+      label: "Market Intel",
+      icon: <Radar className="w-3.5 h-3.5" />,
+    },
+    {
+      id: "skills",
+      label: "Skills",
+      icon: <BookOpen className="w-3.5 h-3.5" />,
+    },
+    {
+      id: "settings",
+      label: "Persona & Schema",
+      icon: <Sliders className="w-3.5 h-3.5" />,
+    },
   ];
 
   return (
     <>
       {/* =====================================================================
           LEVEL 1: MACRO COMMAND STRIP (Sticky Top Bar — Height ~72px)
+          Now includes 3-Tier Workspace Switcher + Tier-Specific Funnel & Stage Lock
           ===================================================================== */}
-      <header className="sticky top-0 z-30 h-[72px] bg-white border-b border-slate-200 px-5 flex items-center justify-between gap-4 select-none shadow-2xs">
-        {/* MODULE 1: Brand + North Star Progress Pill (Paid Students: X / 100 with 25/60/100 milestones) */}
-        <div className="flex items-center gap-3.5 shrink-0">
+      <header className="sticky top-0 z-30 h-[72px] bg-white border-b border-slate-200 px-4 flex items-center justify-between gap-3 select-none shadow-2xs">
+        {/* MODULE 1: Brand + 3-Tier Workspace Switcher + North Star Progress Pill */}
+        <div className="flex items-center gap-3 shrink-0">
           <div
             onClick={() => setActiveTab("copilot")}
-            className="flex items-center gap-2.5 cursor-pointer"
+            className="flex items-center gap-2 cursor-pointer"
           >
             <div className="w-9 h-9 rounded-lg bg-slate-900 text-white flex items-center justify-center">
               <GraduationCap className="w-5 h-5 text-indigo-400" />
             </div>
-            <div className="hidden sm:block">
-              <div className="text-sm font-bold tracking-tight text-slate-900 leading-none">
-                MindLC
-              </div>
-              <div className="text-[10px] font-medium text-slate-500 mt-0.5">
-                $139/mo Hybrid Cockpit
-              </div>
-            </div>
           </div>
 
-          <div className="h-7 w-[1px] bg-slate-200 hidden sm:block" />
+          {/* 3-Tier Workspace Switcher (`TIER_1` | `TIER_2` | `TIER_3`) */}
+          <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
+            {TIER_PILLS.map((tp) => {
+              const isAct = activeTierId === tp.id;
+              const tWs = tierWorkspaces[tp.id];
+              return (
+                <button
+                  key={tp.id}
+                  type="button"
+                  onClick={() => setActiveTierId(tp.id)}
+                  className={`px-2.5 py-1 rounded-lg text-left transition ${
+                    isAct
+                      ? "bg-slate-900 text-white shadow-2xs"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  <div className="text-[11px] font-extrabold leading-tight flex items-center gap-1">
+                    <span>{tp.short}</span>
+                    {tWs.reality_gate_status === "LOCKED" && (
+                      <Lock className="w-2.5 h-2.5 text-amber-400" />
+                    )}
+                  </div>
+                  <div
+                    className={`text-[9.5px] font-mono tabular-nums ${
+                      isAct ? "text-indigo-300" : "text-slate-400"
+                    }`}
+                  >
+                    {tp.price} · {tWs.current_paid_count}/{tWs.north_star_paid_goal}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
 
-          {/* North Star Progress Pill */}
-          <div className="bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-1.5 flex items-center gap-3">
+          {/* North Star Progress Pill for Selected Tier */}
+          <div className="hidden md:flex bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 items-center gap-2.5">
             <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-slate-600">
-                  Paid Students:
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-semibold text-slate-500">
+                  Paid:
                 </span>
-                <span className="text-sm font-extrabold text-slate-900 tabular-nums">
-                  {paidStudentCount} <span className="text-slate-400 font-normal">/ 100</span>
+                <span className="text-xs font-extrabold text-slate-900 tabular-nums">
+                  {paidStudentCount}{" "}
+                  <span className="text-slate-400 font-normal">
+                    / {currentTierWs.north_star_paid_goal}
+                  </span>
                 </span>
               </div>
-              {/* Sleek 3-Segment Progress Bar (25 · 60 · 100) */}
-              <div className="flex items-center gap-1 mt-1 w-36">
+              <div className="flex items-center gap-1 mt-1 w-28">
                 <div
                   className="h-1.5 flex-1 bg-slate-200 rounded-l-full overflow-hidden"
-                  title="Stage 1 Milestone: 25 Students"
+                  title={`Stage 1 Target: ${s1Max}`}
                 >
                   <div
                     className="h-full bg-indigo-600 transition-all"
@@ -226,7 +348,7 @@ export function SafeguardTopBar() {
                 </div>
                 <div
                   className="h-1.5 flex-1 bg-slate-200 overflow-hidden"
-                  title="Stage 2 Milestone: 60 Students"
+                  title={`Stage 2 Target: ${s2Max}`}
                 >
                   <div
                     className="h-full bg-indigo-600 transition-all"
@@ -235,7 +357,7 @@ export function SafeguardTopBar() {
                 </div>
                 <div
                   className="h-1.5 flex-1 bg-slate-200 rounded-r-full overflow-hidden"
-                  title="Stage 3 Milestone: 100 Students"
+                  title={`Stage 3 Target: ${s3Max}`}
                 >
                   <div
                     className="h-full bg-emerald-600 transition-all"
@@ -244,33 +366,42 @@ export function SafeguardTopBar() {
                 </div>
               </div>
             </div>
-
-            <div className="text-[10px] font-mono text-slate-400 leading-tight hidden xl:block">
-              <div>25 · 60 · 100</div>
-              <div className="text-slate-600 font-semibold tabular-nums">
-                ${(paidStudentCount * 139).toLocaleString()} MRR
+            <div className="text-[10px] font-mono text-slate-400 leading-tight hidden 2xl:block tabular-nums">
+              <div>
+                {s1Max} · {s2Max} · {s3Max}
+              </div>
+              <div className="text-slate-600 font-bold">
+                ${(paidStudentCount * currentTierWs.monthly_price_cad).toLocaleString()}{" "}
+                MRR
               </div>
             </div>
           </div>
         </div>
 
-        {/* MODULE 2: Active Bottleneck Lock Badge (Clickable Popover for Allowed vs Blocked Scope) */}
+        {/* MODULE 2: Active Bottleneck Lock Badge (Popover with Editable Stage 1/2/3 Goals!) */}
         <div className="relative shrink-0">
           <button
             type="button"
             onClick={() => setIsBottleneckPopoverOpen(!isBottleneckPopoverOpen)}
-            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-100/80 border border-amber-300 text-amber-950 text-xs font-bold transition"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100/80 border border-amber-300 text-amber-950 text-xs font-bold transition"
           >
-            <span>🔒 {stageCfg.shortLabel}</span>
-            <ChevronDown className="w-3.5 h-3.5 text-amber-700" />
+            <span className="truncate max-w-[230px] sm:max-w-xs">
+              🔒 {stageGoal.short_badge}
+            </span>
+            <ChevronDown className="w-3.5 h-3.5 text-amber-700 shrink-0" />
           </button>
 
           {isBottleneckPopoverOpen && (
-            <div className="absolute left-0 mt-2 w-96 bg-white rounded-xl border border-slate-200 shadow-xl p-4 z-50 space-y-3 text-xs">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                <span className="font-bold text-slate-900">
-                  Single-Bottleneck Lock-In Engine
-                </span>
+            <div className="absolute left-0 mt-2 w-[440px] bg-white rounded-2xl border border-slate-200 shadow-2xl p-4 z-50 space-y-3.5 text-xs">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                <div>
+                  <span className="font-extrabold text-slate-900 block">
+                    {currentTierWs.tier_name} ({currentTierWs.price_label})
+                  </span>
+                  <span className="text-[11px] text-slate-500">
+                    {currentTierWs.offer_summary}
+                  </span>
+                </div>
                 <button
                   onClick={() => setIsBottleneckPopoverOpen(false)}
                   className="text-slate-400 hover:text-slate-600"
@@ -279,22 +410,127 @@ export function SafeguardTopBar() {
                 </button>
               </div>
 
-              <div className="space-y-1">
-                <div className="text-[11px] font-bold uppercase text-amber-800">
-                  Locked Objective:
+              {/* Stage 1 / Stage 2 / Stage 3 Switcher & Editable Goals */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase text-slate-500">
+                    Select or Edit Stage Goals ({currentTierWs.tier_short_name}):
+                  </span>
+                  <span className="text-[11px] text-slate-400 tabular-nums">
+                    Paid Count: {paidStudentCount}
+                  </span>
                 </div>
-                <p className="text-slate-700 font-medium">
-                  {stageCfg.lockedObjective}
-                </p>
+
+                {(["STAGE_1", "STAGE_2", "STAGE_3"] as StageId[]).map((st) => {
+                  const g = currentTierWs.stage_goals[st];
+                  const isCurrent = activeBottleneckStage === st;
+                  const isEditingThis = editingStageId === st;
+
+                  return (
+                    <div
+                      key={st}
+                      className={`p-3 rounded-xl border transition ${
+                        isCurrent
+                          ? "bg-indigo-50/60 border-indigo-400"
+                          : "bg-slate-50 border-slate-200"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setActiveStageOverride(st)}
+                          className="text-left font-bold text-slate-900 hover:text-indigo-700 flex items-center gap-1.5"
+                        >
+                          <span
+                            className={`w-2 h-2 rounded-full ${
+                              isCurrent ? "bg-indigo-600" : "bg-slate-300"
+                            }`}
+                          />
+                          <span>{g.stage_title}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            isEditingThis
+                              ? setEditingStageId(null)
+                              : handleOpenStageGoalEdit(st)
+                          }
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white border border-slate-200 text-[10px] font-bold text-slate-600 hover:text-indigo-700"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          {isEditingThis ? "Close" : "Edit Goal"}
+                        </button>
+                      </div>
+
+                      <div className="text-[11px] text-slate-600 mt-1 pl-3.5 tabular-nums">
+                        Target: <strong>{g.primary_kpi_name} ≥ {g.primary_kpi_target_pct}%</strong>{" "}
+                        · {g.secondary_kpi_summary}
+                      </div>
+
+                      {isEditingThis && (
+                        <div className="mt-2.5 pt-2.5 border-t border-slate-200 grid grid-cols-3 gap-2">
+                          <div className="col-span-2">
+                            <label className="block text-[10px] font-bold text-slate-500">
+                              Primary KPI Name
+                            </label>
+                            <input
+                              type="text"
+                              value={editKpiName}
+                              onChange={(e) => setEditKpiName(e.target.value)}
+                              className="w-full mt-0.5 px-2 py-1 rounded border border-slate-300 bg-white text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500">
+                              Target %
+                            </label>
+                            <input
+                              type="number"
+                              value={editKpiTargetPct}
+                              onChange={(e) =>
+                                setEditKpiTargetPct(Number(e.target.value))
+                              }
+                              className="w-full mt-0.5 px-2 py-1 rounded border border-slate-300 bg-white text-xs font-bold tabular-nums"
+                            />
+                          </div>
+                          <div className="col-span-2">
+                            <label className="block text-[10px] font-bold text-slate-500">
+                              Stage Paid Student Milestone
+                            </label>
+                            <input
+                              type="number"
+                              value={editTargetPaid}
+                              onChange={(e) =>
+                                setEditTargetPaid(Number(e.target.value))
+                              }
+                              className="w-full mt-0.5 px-2 py-1 rounded border border-slate-300 bg-white text-xs font-bold tabular-nums"
+                            />
+                          </div>
+                          <div className="flex items-end">
+                            <button
+                              type="button"
+                              onClick={() => handleSaveStageGoalEdit(st)}
+                              className="w-full py-1.5 rounded bg-indigo-600 text-white font-bold text-[11px]"
+                            >
+                              Save Goal
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
 
+              {/* Allowed vs Blocked Scope for Active Stage */}
               <div className="grid grid-cols-2 gap-2.5">
                 <div className="p-2.5 rounded-lg bg-emerald-50/70 border border-emerald-200 space-y-1">
                   <div className="font-bold text-emerald-900 text-[11px]">
-                    ✓ Allowed Proposal Types
+                    ✓ Allowed ({activeBottleneckStage})
                   </div>
                   <ul className="text-[11px] text-emerald-800 space-y-0.5">
-                    {stageCfg.allowedProposalTypes.map((item, i) => (
+                    {stageGoal.allowed_scope.map((item, i) => (
                       <li key={i}>• {item}</li>
                     ))}
                   </ul>
@@ -302,63 +538,33 @@ export function SafeguardTopBar() {
 
                 <div className="p-2.5 rounded-lg bg-rose-50/70 border border-rose-200 space-y-1">
                   <div className="font-bold text-rose-900 text-[11px]">
-                    ✕ Blocked Scope
+                    ✕ Blocked &amp; Tone Guardrails
                   </div>
                   <ul className="text-[11px] text-rose-800 space-y-0.5">
-                    {stageCfg.blockedScope.map((item, i) => (
+                    {stageGoal.blocked_scope.map((item, i) => (
                       <li key={i}>• {item}</li>
                     ))}
                   </ul>
                 </div>
               </div>
 
-              {/* Stage Simulator Switcher */}
-              <div className="pt-2 border-t border-slate-100">
-                <div className="text-[11px] font-semibold text-slate-500 mb-1.5">
-                  Simulate Paid Student Milestone Stage:
-                </div>
-                <div className="grid grid-cols-3 gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setPaidStudentCount(14)}
-                    className={`py-1.5 px-2 rounded-lg font-bold text-[11px] border ${
-                      activeBottleneckStage === "STAGE_1_CONVERSION"
-                        ? "bg-indigo-600 text-white border-indigo-600"
-                        : "bg-slate-50 text-slate-700 border-slate-200"
-                    }`}
-                  >
-                    Stage 1 (14/100)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPaidStudentCount(38)}
-                    className={`py-1.5 px-2 rounded-lg font-bold text-[11px] border ${
-                      activeBottleneckStage === "STAGE_2_REFERRAL_DIAG"
-                        ? "bg-indigo-600 text-white border-indigo-600"
-                        : "bg-slate-50 text-slate-700 border-slate-200"
-                    }`}
-                  >
-                    Stage 2 (38/100)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPaidStudentCount(72)}
-                    className={`py-1.5 px-2 rounded-lg font-bold text-[11px] border ${
-                      activeBottleneckStage === "STAGE_3_SCALE_ADS"
-                        ? "bg-indigo-600 text-white border-indigo-600"
-                        : "bg-slate-50 text-slate-700 border-slate-200"
-                    }`}
-                  >
-                    Stage 3 (72/100)
-                  </button>
-                </div>
+              {/* Simulate Paid Count Input */}
+              <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-slate-600">
+                  Simulate {currentTierWs.tier_short_name} Paid Student Count:
+                </span>
+                <input
+                  type="number"
+                  min={0}
+                  max={300}
+                  value={paidStudentCount}
+                  onChange={(e) => setPaidStudentCount(Number(e.target.value))}
+                  className="w-20 px-2.5 py-1 rounded-lg border border-slate-300 text-xs font-extrabold text-center tabular-nums"
+                />
               </div>
 
-              {/* Workspace Module Switcher inside Popover */}
+              {/* Workspace Module Switcher */}
               <div className="pt-2 border-t border-slate-100">
-                <div className="text-[11px] font-semibold text-slate-500 mb-1.5">
-                  Switch Command Module:
-                </div>
                 <div className="flex flex-wrap gap-1.5">
                   {secondaryViews.map((sv) => (
                     <button
@@ -384,10 +590,10 @@ export function SafeguardTopBar() {
           )}
         </div>
 
-        {/* MODULE 3: Live Mini-Funnel Health Strip (Tabular Numerals + Lowest Rate Auto-Highlighted in Amber/Red) */}
-        <div className="hidden lg:flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-1.5 text-xs tabular-nums">
+        {/* MODULE 3: Live Mini-Funnel Health Strip (Uses Tier-Specific Funnel Step Labels!) */}
+        <div className="hidden xl:flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs tabular-nums">
           <div className="px-2 py-0.5 rounded-md text-slate-700">
-            <span className="text-slate-500">Contacts</span>{" "}
+            <span className="text-slate-500">{lbl1.split("/")[0]}</span>{" "}
             <strong className="font-bold text-slate-900">
               {metrics.reach_or_contacts}
             </strong>
@@ -402,8 +608,7 @@ export function SafeguardTopBar() {
                 : "text-slate-700"
             }`}
           >
-            <span>Diag Booked</span>{" "}
-            <strong>{rates.contactToBookedPct}%</strong>
+            <span>{lbl2}</span> <strong>{rates.contactToBookedPct}%</strong>
           </div>
 
           <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
@@ -415,38 +620,36 @@ export function SafeguardTopBar() {
                 : "text-slate-700"
             }`}
           >
-            <span>Diag Done</span>{" "}
-            <strong>{rates.bookedToCompletedPct}%</strong>
+            <span>{lbl3}</span> <strong>{rates.bookedToCompletedPct}%</strong>
           </div>
 
           <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
 
           <div
             className={`px-2.5 py-0.5 rounded-md ${
-              lowestStepKey === "paid" || rates.completedToPaidPct < 25
+              lowestStepKey === "paid" ||
+              rates.completedToPaidPct < stageGoal.primary_kpi_target_pct
                 ? "bg-rose-100 text-rose-900 border border-rose-300 font-extrabold"
                 : "bg-emerald-50 text-emerald-800 font-bold"
             }`}
-            title="Lowest conversion step in funnel — automatically highlighted"
           >
-            <span>Paid</span> <strong>{rates.completedToPaidPct}%</strong>
-            {rates.completedToPaidPct < 25 && (
+            <span>{lbl4}</span> <strong>{rates.completedToPaidPct}%</strong>
+            {rates.completedToPaidPct < stageGoal.primary_kpi_target_pct && (
               <span className="ml-1 text-[10px] uppercase tracking-wider">
-                (Bottleneck)
+                (&lt;{stageGoal.primary_kpi_target_pct}%)
               </span>
             )}
           </div>
         </div>
 
-        {/* MODULE 4: Reality Gate Status Button (Right-aligned) + Compact View Switcher */}
+        {/* MODULE 4: Reality Gate Status Button (Per-Tier) */}
         <div className="flex items-center gap-2 shrink-0">
           {isSampleSeedActive && (
             <span
               onClick={() => setRealityGateModalOpen(true)}
-              className="hidden xl:inline-flex items-center px-2 py-1 rounded-md bg-slate-100 text-slate-600 border border-slate-200 text-[11px] font-medium cursor-pointer hover:bg-slate-200"
-              title="Initial Ontario Grade 11/12 STEM sample data — clears on your first Weekly Reality Gate submission"
+              className="hidden 2xl:inline-flex items-center px-2 py-1 rounded-md bg-slate-100 text-slate-600 border border-slate-200 text-[11px] font-medium cursor-pointer hover:bg-slate-200"
             >
-              Sample Seed Data
+              Sample Seed
             </span>
           )}
 
@@ -454,10 +657,10 @@ export function SafeguardTopBar() {
             <button
               type="button"
               onClick={() => setRealityGateModalOpen(true)}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs shadow-sm animate-pulse transition"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs shadow-sm animate-pulse transition"
             >
-              <AlertTriangle className="w-4 h-4" />
-              ⚠️ Log Weekly Reality (60s) to Unlock Proposals
+              <AlertTriangle className="w-3.5 h-3.5" />
+              ⚠️ Log {currentTierWs.tier_short_name} Reality (60s)
             </button>
           ) : (
             <button
@@ -466,18 +669,14 @@ export function SafeguardTopBar() {
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-xs transition"
             >
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              ✓ Reality Gate Current (5d left)
+              ✓ {currentTierWs.tier_id} Gate Current
             </button>
           )}
 
           <button
             type="button"
             onClick={toggleRealityGateLockSimulation}
-            title={
-              isLocked
-                ? "Click to unlock Reality Gate"
-                : "Click to simulate LOCKED Reality Gate state"
-            }
+            title={`Toggle Reality Gate Lock for ${currentTierWs.tier_name}`}
             className="p-2 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition"
           >
             {isLocked ? (
@@ -506,7 +705,7 @@ export function SafeguardTopBar() {
       )}
 
       {/* =====================================================================
-          SPECIAL INTERACTIVE FLOW 1: WEEKLY REALITY GATE MODAL (60-Sec Check)
+          WEEKLY REALITY GATE MODAL (Scoped to Active Tier + Multi-Tier Option)
           ===================================================================== */}
       {isRealityGateModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
@@ -514,10 +713,10 @@ export function SafeguardTopBar() {
             <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">
               <div>
                 <div className="text-[11px] font-bold uppercase tracking-wider text-amber-400">
-                  Safeguard 1 · 60-Second Market Reality Check
+                  Safeguard 1 · {currentTierWs.tier_name} ({currentTierWs.price_label})
                 </div>
                 <h2 className="font-bold text-base mt-0.5">
-                  Log Weekly Funnel Reality &amp; Verbatim Ontario Parent Quotes
+                  Log Weekly Funnel Reality &amp; Shared VoC Parent Quotes
                 </h2>
               </div>
               <button
@@ -535,11 +734,11 @@ export function SafeguardTopBar() {
                 </div>
               )}
 
-              {/* Step 1: 4 Numeric Funnel Inputs + Automatic Live Conversion % */}
+              {/* Step 1: Tier-Specific Funnel Labels & Live Conversion % */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                    1. Weekly Funnel Numbers (`{weekStart}`)
+                    1. {currentTierWs.tier_short_name} Funnel Numbers (`{weekStart}`)
                   </label>
                   <input
                     type="date"
@@ -551,8 +750,8 @@ export function SafeguardTopBar() {
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 tabular-nums">
                   <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-                    <label className="block text-[11px] font-semibold text-slate-500">
-                      Contacts / Reach
+                    <label className="block text-[11px] font-semibold text-slate-500 truncate">
+                      {lbl1}
                     </label>
                     <input
                       type="number"
@@ -562,13 +761,13 @@ export function SafeguardTopBar() {
                       className="w-full mt-1 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-base font-extrabold text-slate-900"
                     />
                     <div className="text-[11px] text-slate-400 mt-1">
-                      Top of funnel
+                      Step 1 Input
                     </div>
                   </div>
 
                   <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-                    <label className="block text-[11px] font-semibold text-slate-500">
-                      Diag Booked
+                    <label className="block text-[11px] font-semibold text-slate-500 truncate">
+                      {lbl2}
                     </label>
                     <input
                       type="number"
@@ -578,13 +777,13 @@ export function SafeguardTopBar() {
                       className="w-full mt-1 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-base font-extrabold text-slate-900"
                     />
                     <div className="text-[11px] font-semibold text-slate-600 mt-1">
-                      {modalLiveRates.contactToBookedPct}% Booked Rate
+                      {modalLiveRates.contactToBookedPct}% Rate
                     </div>
                   </div>
 
                   <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-                    <label className="block text-[11px] font-semibold text-slate-500">
-                      Diag Completed
+                    <label className="block text-[11px] font-semibold text-slate-500 truncate">
+                      {lbl3}
                     </label>
                     <input
                       type="number"
@@ -594,19 +793,20 @@ export function SafeguardTopBar() {
                       className="w-full mt-1 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-base font-extrabold text-slate-900"
                     />
                     <div className="text-[11px] font-semibold text-slate-600 mt-1">
-                      {modalLiveRates.bookedToCompletedPct}% Show-Up Rate
+                      {modalLiveRates.bookedToCompletedPct}% Completion
                     </div>
                   </div>
 
                   <div
                     className={`p-3 rounded-xl border ${
-                      modalLiveRates.completedToPaidPct < 25
+                      modalLiveRates.completedToPaidPct <
+                      stageGoal.primary_kpi_target_pct
                         ? "bg-amber-50/70 border-amber-300"
                         : "bg-emerald-50/70 border-emerald-300"
                     }`}
                   >
-                    <label className="block text-[11px] font-bold text-slate-700">
-                      Paid ($139/mo)
+                    <label className="block text-[11px] font-bold text-slate-700 truncate">
+                      {lbl4}
                     </label>
                     <input
                       type="number"
@@ -617,29 +817,35 @@ export function SafeguardTopBar() {
                     />
                     <div
                       className={`text-[11px] font-bold mt-1 ${
-                        modalLiveRates.completedToPaidPct < 25
+                        modalLiveRates.completedToPaidPct <
+                        stageGoal.primary_kpi_target_pct
                           ? "text-amber-900"
                           : "text-emerald-800"
                       }`}
                     >
-                      {modalLiveRates.completedToPaidPct}% Diag→Paid (Target ≥25%)
+                      {modalLiveRates.completedToPaidPct}% (Target ≥
+                      {stageGoal.primary_kpi_target_pct}%)
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Step 2: 2+ Verbatim Parent Quotes + Tag Chips */}
+              {/* Step 2: Verbatim Parent Quotes with Tier Scope Tag (`TIER_1` | `TIER_2` | `TIER_3` | `ALL`) */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                    2. Exact Verbatim Parent Objections Heard This Week (Min 2)
+                    2. Verbatim Parent Quotes (Saved to Shared VoC Vault)
                   </label>
                   <button
                     type="button"
                     onClick={() =>
                       setQuotes([
                         ...quotes,
-                        { quote_text: "", context_tag: "trust" },
+                        {
+                          quote_text: "",
+                          context_tag: "trust",
+                          tier_id: activeTierId,
+                        },
                       ])
                     }
                     className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-700"
@@ -655,9 +861,33 @@ export function SafeguardTopBar() {
                     className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2"
                   >
                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <span className="text-[11px] font-bold text-slate-500">
-                        Parent Verbatim Quote #{idx + 1}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-bold text-slate-500">
+                          Quote #{idx + 1}
+                        </span>
+                        <select
+                          value={q.tier_id}
+                          onChange={(e) =>
+                            setQuotes(
+                              quotes.map((item, i) =>
+                                i === idx
+                                  ? {
+                                      ...item,
+                                      tier_id: e.target.value as VoCTierTag,
+                                    }
+                                  : item
+                              )
+                            )
+                          }
+                          className="px-2 py-0.5 rounded border border-slate-300 bg-white text-[11px] font-bold text-indigo-700"
+                        >
+                          <option value="ALL">Shared: ALL Tiers</option>
+                          <option value="TIER_1">Tier 1 Only (Self-Coach)</option>
+                          <option value="TIER_2">Tier 2 Only (Hybrid)</option>
+                          <option value="TIER_3">Tier 3 Only (Prime 1:1)</option>
+                        </select>
+                      </div>
+
                       <div className="flex flex-wrap gap-1">
                         {CONTEXT_TAGS.map((tag) => (
                           <button
@@ -703,22 +933,35 @@ export function SafeguardTopBar() {
                 ))}
               </div>
 
-              {/* Step 3: 1 Winning Touchpoint Field */}
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
-                  3. Top Winning Touchpoint This Week
+              {/* Step 3: Top Winning Touchpoint + Multi-Tier Unlock Checkbox */}
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
+                    3. Top Winning Touchpoint for {currentTierWs.tier_short_name}
+                  </label>
+                  <input
+                    type="text"
+                    value={touchpoint}
+                    onChange={(e) => setTouchpoint(e.target.value)}
+                    required
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs text-slate-900"
+                  />
+                </div>
+
+                <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer font-medium">
+                  <input
+                    type="checkbox"
+                    checked={alsoUnlockOtherTiers}
+                    onChange={(e) => setAlsoUnlockOtherTiers(e.target.checked)}
+                    className="rounded border-slate-300 text-indigo-600"
+                  />
+                  <span>
+                    Also mark Reality Gate as UNLOCKED across all 3 product
+                    tiers (`TIER_1`, `TIER_2`, `TIER_3`) for this week
+                  </span>
                 </label>
-                <input
-                  type="text"
-                  value={touchpoint}
-                  onChange={(e) => setTouchpoint(e.target.value)}
-                  required
-                  placeholder="Single channel or conversation that produced the highest positive parent response..."
-                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs text-slate-900"
-                />
               </div>
 
-              {/* Actions */}
               <div className="pt-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3">
                 {!pilotWeek0Used ? (
                   <button
@@ -726,7 +969,7 @@ export function SafeguardTopBar() {
                     onClick={activatePilotWeek0Override}
                     className="px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 text-xs font-bold transition"
                   >
-                    ⚡ Pilot Week 0 Bootstrap Override (1-Time)
+                    ⚡ Pilot Week 0 Bootstrap Override
                   </button>
                 ) : (
                   <span className="text-[11px] text-slate-400">
@@ -747,7 +990,7 @@ export function SafeguardTopBar() {
                     className="inline-flex items-center gap-1.5 px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-sm transition"
                   >
                     <CheckCircle2 className="w-4 h-4" />
-                    Submit Reality Log &amp; Calibrate Proposals
+                    Submit {currentTierWs.tier_short_name} Reality Log
                   </button>
                 </div>
               </div>
