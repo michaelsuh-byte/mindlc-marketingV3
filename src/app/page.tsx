@@ -15,20 +15,20 @@ export default function MindLCCommandCenterApp() {
   const { activeTab } = useMarketingStore();
 
   return (
-    <div className="min-h-screen flex bg-slate-50 text-slate-900">
-      {/* Persistent Sidebar Navigation */}
-      <Sidebar />
+    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
+      {/* LEVEL 1: MACRO COMMAND STRIP (Sticky Top Bar — Height ~72px) */}
+      <SafeguardTopBar />
 
-      {/* Main Dynamic Workspace with Persistent Conversion Safeguards Ribbon */}
-      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-        <SafeguardTopBar />
+      {/* LEVEL 2 (Left Meso Pipeline & VoC Rail) + LEVEL 3 (Micro Decision & Refinement Stage) */}
+      <div className="flex-1 flex min-w-0 overflow-hidden">
+        <Sidebar />
         <main className="flex-1 min-w-0 overflow-y-auto">
-          {activeTab === "dashboard" && <DashboardView />}
+          {activeTab === "copilot" && <CampaignCoPilotView />}
           {activeTab === "planner" && <CmoPlannerAgentsView />}
           {activeTab === "intel" && <MarketIntelView />}
-          {activeTab === "copilot" && <CampaignCoPilotView />}
           {activeTab === "skills" && <SkillLibraryView />}
           {activeTab === "settings" && <AiSettingsPersonaView />}
+          {activeTab === "dashboard" && <DashboardView />}
         </main>
       </div>
     </div>

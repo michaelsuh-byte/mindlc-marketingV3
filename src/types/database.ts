@@ -26,13 +26,16 @@ export interface Campaign {
 }
 
 export type AssetPlatform =
+  | "Parent Call"
+  | "Email"
+  | "Community"
+  | "Cognitive Report & Debrief Script"
+  | "Email Sequence"
+  | "Parent Referral & Seminar Kit"
   | "Landing Page"
   | "Facebook"
-  | "Blog"
   | "SEO Meta"
-  | "Email Sequence"
-  | "Cognitive Report & Debrief Script"
-  | "Parent Referral & Seminar Kit";
+  | "Blog";
 
 export type DetailLevel = 1 | 2 | 3;
 
@@ -52,6 +55,7 @@ export interface VerbatimParentQuote {
   quote_text: string;
   context_tag: VoCContextTag;
   week_start_date: string;
+  is_sample?: boolean;
 }
 
 export interface WeeklyFunnelMetrics {
@@ -68,6 +72,7 @@ export interface WeeklyRealityLog {
   verbatim_parent_quotes: VerbatimParentQuote[]; // Minimum 2 required
   top_winning_touchpoint: string;
   created_at: string;
+  is_sample?: boolean;
 }
 
 export type RealityGateStatus =
@@ -86,6 +91,7 @@ export type ActiveBottleneckStage =
 
 export interface BottleneckStageConfig {
   stage: ActiveBottleneckStage;
+  shortLabel: string;
   label: string;
   studentRange: [number, number];
   lockedObjective: string;
@@ -109,10 +115,25 @@ export interface ScopeDriftWarning {
 // ============================================================================
 
 export type HITLProposalState =
-  | "DRAFT"
-  | "APPROVED_FOR_EXECUTION"
-  | "VALIDATED_WINNER"
-  | "KILLED_BY_STOP_LOSS";
+  | "KILLED_BY_STOP_LOSS" // 🔴 Kill-Criteria Triggered (Pinned to top)
+  | "DRAFT" // 🟡 Awaiting CMO Decision
+  | "APPROVED_FOR_EXECUTION" // 🟢 Approved / Live
+  | "VALIDATED_WINNER" // 🟢 Approved / Live (Target Met)
+  | "ARCHIVED"; // ⚪ Archived / Killed (Institutional memory)
+
+export interface ProposalVersionSnapshot {
+  version: number;
+  content: string;
+  single_cta: string;
+  change_summary: string;
+  timestamp: string;
+}
+
+export interface CMOApprovalChecklist {
+  ontario_context: boolean; // Speaks to real Ontario K/T/C/A, unit test, or anti-cheating concerns
+  single_cta: boolean; // Asks the parent to take exactly one clear next step
+  brand_trust: boolean; // Zero hype or exaggerated grade guarantees
+}
 
 export interface MandatoryProposalSchema {
   proposal_id: string;
@@ -139,6 +160,7 @@ export interface Asset {
   id: string;
   campaign_id: string;
   platform: AssetPlatform;
+  channel_badge?: string; // e.g., "Parent Call", "Email", "Community", "Meta Ad"
   title?: string;
   content: string;
   detail_level_used: DetailLevel;
@@ -148,9 +170,13 @@ export interface Asset {
   // HITL & Mandatory Proposal Schema extensions
   proposal_schema?: MandatoryProposalSchema;
   hitl_state?: HITLProposalState;
+  cmo_checklist?: CMOApprovalChecklist;
   devils_advocate_verified?: boolean;
   kill_criteria_acknowledged?: boolean;
   revision_count?: number;
+  versions?: ProposalVersionSnapshot[];
+  kill_or_reject_reason?: string;
+  is_sample?: boolean;
 }
 
 export interface BrandPersona {
@@ -170,6 +196,7 @@ export interface MandatoryOutputProtocol {
   assetTitle: string;
   marketingContent: string;
   proposalSchema: MandatoryProposalSchema;
+  changeSummaryPill?: string;
   strategicJustification: {
     detailLevel: DetailLevel;
     levelLabel:
@@ -186,11 +213,13 @@ export interface MandatoryOutputProtocol {
 
 export interface ChatMessage {
   id: string;
+  proposalId?: string;
   sender: "user" | "ai" | "guardrail";
   timestamp: string;
   skillName: string;
   detailLevel: DetailLevel;
   userPrompt?: string;
+  changeSummaryPill?: string;
   strategicJustification?: MandatoryOutputProtocol["strategicJustification"];
   scopeDriftWarning?: ScopeDriftWarning;
   linkedAssetId?: string;
@@ -237,10 +266,6 @@ export interface CompetitorProfile {
   recommendedConversionPlay: string;
   lastScannedAt: string;
 }
-
-// ============================================================================
-// SELF-GUIDED MULTI-AGENT MARKETING TEAM & MULTI-HORIZON PLANNER TYPES
-// ============================================================================
 
 export type PlanHorizon =
   | "Daily"

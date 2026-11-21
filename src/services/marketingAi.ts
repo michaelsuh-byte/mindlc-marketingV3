@@ -27,11 +27,12 @@ export const BOTTLENECK_STAGE_CONFIGS: Record<
 > = {
   STAGE_1_CONVERSION: {
     stage: "STAGE_1_CONVERSION",
+    shortLabel: "Stage 1: Fix Diag → Paid (Target ≥ 25%)",
     label: "Stage 1: Diagnostic-to-Paid Conversion Lock (0–25 Students)",
     studentRange: [0, 25],
     lockedObjective:
       "Maximize Diagnostic Completed -> Paid Conversion (Target >= 25% at $139 CAD/mo Tier 2 Managed Hybrid)",
-    targetBenchmark: "Diag Completed -> Paid >= 25%",
+    targetBenchmark: "Diag → Paid ≥ 25%",
     allowedProposalTypes: [
       "Cognitive Report layout/copy",
       "10-minute parent debrief call scripts",
@@ -59,11 +60,12 @@ export const BOTTLENECK_STAGE_CONFIGS: Record<
   },
   STAGE_2_REFERRAL_DIAG: {
     stage: "STAGE_2_REFERRAL_DIAG",
+    shortLabel: "Stage 2: Referrals & Seminars → Diag (Target ≥ 40%)",
     label: "Stage 2: Referral & Community-to-Diagnostic Lock (26–60 Students)",
     studentRange: [26, 60],
     lockedObjective:
       "Maximize Parent Referrals & Community/Seminar -> Diagnostic Booked (Target >= 40%)",
-    targetBenchmark: "Referral & Seminar -> Diag Booked >= 40%",
+    targetBenchmark: "Referral/Seminar → Diag ≥ 40%",
     allowedProposalTypes: [
       "Week 4–6 referral invite flows",
       "Ontario parent seminar/webinar kits",
@@ -81,17 +83,20 @@ export const BOTTLENECK_STAGE_CONFIGS: Record<
   },
   STAGE_3_SCALE_ADS: {
     stage: "STAGE_3_SCALE_ADS",
+    shortLabel: "Stage 3: Scale GTA Ads (Blended CAC < $150 CAD)",
     label: "Stage 3: GTA Paid Ad Scaling Lock (61–100 Students)",
     studentRange: [61, 100],
     lockedObjective:
       "Scale validated diagnostic landing pages via targeted GTA (Mississauga, Toronto, Oakville, Markham) Meta/Google ads while holding Blended CAC < $150 CAD",
-    targetBenchmark: "Blended CAC < $150 CAD (1.08-mo payback on $139 CAD/mo)",
+    targetBenchmark: "Blended CAC < $150 CAD",
     allowedProposalTypes: [
       "Paid ad creative variants (GTA geo-targeted)",
       "Landing page A/B tests",
       "Budget reallocation alerts",
     ],
-    blockedScope: ["Unmeasured brand awareness campaigns without CAC stop-loss"],
+    blockedScope: [
+      "Unmeasured brand awareness campaigns without CAC stop-loss",
+    ],
     blockedKeywords: ["untracked billboard", "brand awareness only"],
   },
 };
@@ -124,9 +129,6 @@ export function computeFunnelRates(metrics: WeeklyFunnelMetrics) {
   };
 }
 
-/**
- * Checks if a user command or target platform violates the active Single-Bottleneck Lock-In Stage.
- */
 export function checkBottleneckScopeDrift(params: {
   userCommand: string;
   preferredPlatform: AssetPlatform;
@@ -159,10 +161,10 @@ export function checkBottleneckScopeDrift(params: {
         detected: true,
         requestedCommand: userCommand,
         activeStage,
-        blockedReason: `Out-of-Scope Request Detected during ${activeStage} (${paidStudents}/100 paid students). Cold paid ads, broad social calendars, and SEO blog clusters are locked until Diagnostic-to-Paid hits >= 25%.`,
-        bottleneckMathExplanation: `Current Funnel Reality: Your latest Weekly Reality Log shows ${funnelMetrics.diag_completed} Diagnostics Completed and ${funnelMetrics.paid_conversions} Paid Conversions (${rates.completedToPaidPct}% Diag-to-Paid rate). Pouring top-of-funnel cold traffic into a ${rates.completedToPaidPct}% bucket burns acquisition cash before the $139 CAD/mo Tier 2 Managed Hybrid close loop is watertight.`,
+        blockedReason: `Scope Drift Blocked during ${activeStage} (${paidStudents}/100 paid students). Cold paid ads, broad social calendars, and SEO blog clusters are locked until Diagnostic → Paid reaches ≥ 25%.`,
+        bottleneckMathExplanation: `Latest Weekly Reality Log: ${funnelMetrics.diag_completed} Diagnostics Completed → ${funnelMetrics.paid_conversions} Paid (${rates.completedToPaidPct}% Diag-to-Paid conversion vs. 25% target). Driving cold top-of-funnel traffic into a ${rates.completedToPaidPct}% conversion step leaks 79% of hard-won parent demos before our $139 CAD/mo Tier 2 debrief close is locked.`,
         suggestedInScopeAlternative:
-          "Switch to an allowed Stage 1 asset: (1) Cognitive Diagnostic Report copy, (2) 10-Minute Parent Debrief Call Script, (3) Post-Diagnostic 3-Touch Follow-Up Sequence, or (4) $139 CAD/mo Offer Framing & 30-Day Guarantee Copy.",
+          "Focus on an allowed Stage 1 asset: (1) Cognitive Diagnostic Report layout, (2) 10-Min Parent Debrief Script, (3) 72-Hr Post-Diagnostic Follow-Up, or (4) 30-Day Active-Habit Guarantee copy.",
       };
     }
   }
@@ -176,10 +178,10 @@ export function checkBottleneckScopeDrift(params: {
         detected: true,
         requestedCommand: userCommand,
         activeStage,
-        blockedReason: `Out-of-Scope Request Detected during ${activeStage} (${paidStudents}/100 paid students). High-budget cold ad scaling is locked until Referral & Seminar -> Diagnostic Booked reaches >= 40%.`,
-        bottleneckMathExplanation: `At ${paidStudents} students ($${paidStudents * 139} CAD MRR), your highest-leverage growth engine is harvesting warm parent referrals at Week 4–6 and Ontario parent unit-test seminars (MPM2D, MCR3U, MHF4U, SBI3U) where CAC is near $0 CAD.`,
+        blockedReason: `Scope Drift Blocked during ${activeStage} (${paidStudents}/100 paid students). High-budget cold ad scaling is locked until Referral & Seminar → Diagnostic Booked reaches ≥ 40%.`,
+        bottleneckMathExplanation: `At ${paidStudents} students ($${paidStudents * 139} CAD MRR), your highest-leverage growth loop is Week 4–6 warm parent referrals and local MHF4U/SBI3U/MCR3U unit-test prep seminars at near-$0 CAC.`,
         suggestedInScopeAlternative:
-          "Generate a Week 4–6 Parent Referral Invite Flow, an Ontario Parent Seminar Kit, or a Grade 11 MCR3U / SBI3U Unit-Test Lead Magnet.",
+          "Draft a Week 4–6 Parent Referral Invite Flow, an Ontario Parent Seminar Kit, or a Grade 11/12 MHF4U/SBI3U Unit-Test Lead Magnet.",
       };
     }
   }
@@ -193,10 +195,6 @@ export function checkBottleneckScopeDrift(params: {
     suggestedInScopeAlternative: "",
   };
 }
-
-// ============================================================================
-// SAFEGUARD 3: MANDATORY PROPOSAL SCHEMA VALIDATOR
-// ============================================================================
 
 export function validateMandatoryProposalSchema(
   p: MandatoryProposalSchema
@@ -216,7 +214,7 @@ export function validateMandatoryProposalSchema(
   if (!p.channel?.trim()) missing.push("channel");
   if (!p.target_metric?.trim()) missing.push("target_metric");
   if (!Array.isArray(p.cited_voc_quotes) || p.cited_voc_quotes.length === 0) {
-    missing.push("cited_voc_quotes (must cite >= 1 WeeklyRealityLog VoC quote)");
+    missing.push("cited_voc_quotes");
   }
   if (!p.single_cta?.trim()) missing.push("single_cta");
   if (!p.asset_body?.trim()) missing.push("asset_body");
@@ -241,10 +239,6 @@ export function validateMandatoryProposalSchema(
   return { valid: missing.length === 0, missingFields: missing };
 }
 
-/**
- * Builds the exact Google Gemini system instruction with Context-Cached VoC Quotes,
- * Weekly Funnel Metrics, Single-Bottleneck Lock-In Rules, and Mandatory Proposal Schema.
- */
 export function buildGeminiSystemInstruction(
   skill: MarketingSkill,
   persona: BrandPersona,
@@ -267,7 +261,7 @@ export function buildGeminiSystemInstruction(
 Company: ${persona.companyName} (${persona.planNameAndPrice || "Tier 2 Managed Hybrid Plan: $139 CAD/month"})
 Goal: Acquire first 100 paid Ontario Grades 9–12 STEM students ($13,900 CAD MRR milestone).
 Core Hook: ${persona.coreHook}
-Curriculum Focus: ${persona.curriculumFocus} (MPM2D, MCR3U, MHF4U, MCV4U, SBI3U, SCH4U, SPH4U)
+Curriculum Focus: ${persona.curriculumFocus} (Ontario K/T/C/A Achievement Chart · MPM2D, MCR3U, MHF4U, MCV4U, SBI3U, SCH4U, SPH4U)
 
 [WEEKLY REALITY LOG — COMPUTED FUNNEL RATES]
 • Reach/Contacts -> Diagnostic Booked: ${rates.contactToBookedPct}% (${funnelMetrics.diag_booked}/${funnelMetrics.reach_or_contacts})
@@ -278,12 +272,9 @@ Curriculum Focus: ${persona.curriculumFocus} (MPM2D, MCR3U, MHF4U, MCV4U, SBI3U,
 ${
   top10Quotes.length > 0
     ? top10Quotes
-        .map(
-          (q) =>
-            `- [${q.id}] (tag: ${q.context_tag}): "${q.quote_text}"`
-        )
+        .map((q) => `- [${q.id}] (tag: ${q.context_tag}): "${q.quote_text}"`)
         .join("\n")
-    : `- [VOC-01] (tag: ai_cheating): "My son already uses ChatGPT to finish homework in 5 minutes and then gets 58% on his MCR3U unit test."`
+    : `- [VOC-101] (tag: ai_cheating): "My son already uses ChatGPT to finish homework in 5 minutes and then gets 58% on his MHF4U unit test."`
 }
 [/GEMINI CONTEXT CACHE BLOCK]
 
@@ -291,15 +282,9 @@ ${
 • Locked Objective: ${stageCfg.lockedObjective}
 • Allowed Proposal Types: ${stageCfg.allowedProposalTypes.join(" | ")}
 • STRICTLY FORBIDDEN SCOPE: ${stageCfg.blockedScope.join(" | ")}
-If the Acting CMO requests an out-of-scope campaign, you MUST warn about scope drift, explain the current bottleneck math (${rates.completedToPaidPct}% Diag-to-Paid), and require explicit override confirmation.
 
 [ACTIVE SKILL SYSTEM PROMPT: ${skill.skill_name}]
 ${skill.system_prompt}
-
-[MANDATORY PROPOSAL JSON SCHEMA + DEVIL'S ADVOCATE + KILL CRITERIA]
-Every generated or revised proposal MUST output all required schema fields:
-proposal_id, title, bottleneck_stage, channel, target_metric, cited_voc_quotes, single_cta, asset_body, devils_advocate { primary_failure_hypothesis, blind_spot_question }, kill_criteria { sample_threshold, stop_loss_metric, pivot_action }, and revision_notes.
-Pair with Strategic Justification at Detail Level ${detailLevel}.
 `.trim();
 }
 
@@ -313,6 +298,7 @@ export interface GenerateMarketingRequest {
   vocQuotes?: VerbatimParentQuote[];
   funnelMetrics?: WeeklyFunnelMetrics;
   existingProposalToRevise?: MandatoryProposalSchema;
+  nextVersionNumber?: number;
 }
 
 export async function generateMarketingResponse(
@@ -322,8 +308,7 @@ export async function generateMarketingResponse(
     userCommand,
     selectedSkill,
     detailLevel,
-    brandPersona,
-    preferredPlatform = "Cognitive Report & Debrief Script",
+    preferredPlatform = "Parent Call",
     activeStage = "STAGE_1_CONVERSION",
     vocQuotes = [],
     funnelMetrics = {
@@ -333,21 +318,35 @@ export async function generateMarketingResponse(
       paid_conversions: 3,
     },
     existingProposalToRevise,
+    nextVersionNumber = 2,
   } = req;
 
-  await new Promise((resolve) => setTimeout(resolve, 480));
+  await new Promise((resolve) => setTimeout(resolve, 420));
 
   const lowerCmd = userCommand.toLowerCase();
   const rates = computeFunnelRates(funnelMetrics);
 
-  // Pick top matching VoC quotes from WeeklyRealityLog to cite explicitly
   const matchedQuotes = vocQuotes.filter((q) => {
-    if (lowerCmd.includes("price") || lowerCmd.includes("139") || lowerCmd.includes("cost"))
+    if (
+      lowerCmd.includes("price") ||
+      lowerCmd.includes("139") ||
+      lowerCmd.includes("cost")
+    )
       return q.context_tag === "price";
-    if (lowerCmd.includes("cheat") || lowerCmd.includes("chatgpt") || lowerCmd.includes("socratic"))
+    if (
+      lowerCmd.includes("cheat") ||
+      lowerCmd.includes("chatgpt") ||
+      lowerCmd.includes("socratic")
+    )
       return q.context_tag === "ai_cheating";
-    if (lowerCmd.includes("motivat") || lowerCmd.includes("lazy") || lowerCmd.includes("log in"))
-      return q.context_tag === "student_motivation";
+    if (
+      lowerCmd.includes("ktca") ||
+      lowerCmd.includes("k/t/c/a") ||
+      lowerCmd.includes("curriculum") ||
+      lowerCmd.includes("mhf4u") ||
+      lowerCmd.includes("sbi3u")
+    )
+      return q.context_tag === "curriculum";
     return true;
   });
 
@@ -361,26 +360,63 @@ export async function generateMarketingResponse(
           .slice(0, 2)
           .map((q) => `[${q.id} · ${q.context_tag}] "${q.quote_text}"`)
       : [
-          `[VOC-101 · ai_cheating] "My son already uses ChatGPT to finish homework in 5 minutes and then gets 58% on his MCR3U Functions unit test."`,
-          `[VOC-102 · price] "We already wasted $380/month at Mathnasium—how do I know $139/month won't just be another subscription he ignores?"`,
+          `[VOC-101 · ai_cheating] "My son already uses ChatGPT to finish homework in 5 minutes and then gets 58% on his MHF4U Advanced Functions unit test."`,
+          `[VOC-102 · curriculum] "His teacher marks Ontario K/T/C/A Thinking & Application questions strictly—generic tutoring worksheets don't match MHF4U or SBI3U tests."`,
         ];
 
-  const courseFocus =
-    lowerCmd.includes("sbi3u") || lowerCmd.includes("bio") || lowerCmd.includes("science")
-      ? "Grade 11/12 Ontario STEM (MCR3U Functions & SBI3U/SCH4U)"
-      : lowerCmd.includes("mhf4u") || lowerCmd.includes("mcv4u") || lowerCmd.includes("12")
-      ? "Grade 12 Advanced Functions (MHF4U) & Calculus (MCV4U)"
-      : "Ontario Grades 9–12 STEM (MPM2D, MCR3U, MHF4U, SBI3U)";
-
-  // If revising an existing proposal via conversational HITL refinement:
+  // =========================================================================
+  // CONVERSATIONAL HITL REVISION OF SELECTED PROPOSAL (Level 3 Cockpit)
+  // =========================================================================
   if (existingProposalToRevise) {
-    const revisedBody = `${existingProposalToRevise.asset_body}\n\n---\n### 🔄 [CMO HITL Revision Applied — ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}]\n**Refinement Directive:** "${userCommand}"\n\n• **Sharpened VoC Alignment:** Directly addresses ${citedQuotesList[0]} by contrasting passive answer-copying with MindLC's 4-step Socratic cognitive trace and weekly Human Learning Manager check-in.\n• **Tier 2 Managed Hybrid Framing ($139 CAD/mo):** Breaks down to **$4.63 CAD/day**—less than 2 hours of a private $80/hr tutor—backed by our **30-Day Active-Habit & Unit-Test Improvement Guarantee**.\n• **Single Lock-Step CTA:** "${existingProposalToRevise.single_cta}"`;
+    let revisedBody = existingProposalToRevise.asset_body;
+    let revisedSingleCta = existingProposalToRevise.single_cta;
+    let changeSummaryPill = `Updated v${nextVersionNumber}: Refined copy based on CMO prompt & preserved VoC grounding`;
+    let devilsAdvocate = { ...existingProposalToRevise.devils_advocate };
+
+    if (
+      lowerCmd.includes("soften") ||
+      lowerCmd.includes("salesy") ||
+      lowerCmd.includes("calm") ||
+      lowerCmd.includes("teacher")
+    ) {
+      changeSummaryPill = `Updated v${nextVersionNumber}: Removed sales urgency, reframed as a calm Ontario STEM teacher checklist, and anchored CTA to 20-min diagnostic review`;
+      revisedSingleCta =
+        "Reply 'CHECKLIST' or tap to book a calm, zero-pressure 20-Minute Ontario K/T/C/A Diagnostic Review with a Learning Manager";
+      revisedBody = `${existingProposalToRevise.asset_body}\n\n---\n### 🌿 [v${nextVersionNumber} Refinement — Calm Ontario Teacher & Parent-Advisory Tone]\n> *"As an Ontario secondary STEM educator, I never recommend buying a tutoring plan before diagnosing which bucket of the Ontario Achievement Chart (K/T/C/A) is actually costing your teen marks. In 80% of MHF4U and SBI3U unit tests we review in Mississauga and Oakville, Knowledge (K) is fine—it's multi-step Thinking (T) and Application (A) under closed-book exam conditions where students freeze after relying on ChatGPT for homework."*\n\n• **Zero Grade-Hype Policy:** Removed all promotional urgency; replaced with a transparent walkthrough of the student's 4-step Socratic reasoning trace.\n• **Single Low-Friction Next Step:** ${revisedSingleCta}`;
+    } else if (
+      lowerCmd.includes("k/t/c/a") ||
+      lowerCmd.includes("ktca") ||
+      lowerCmd.includes("ontario") ||
+      lowerCmd.includes("mhf4u") ||
+      lowerCmd.includes("sbi3u")
+    ) {
+      changeSummaryPill = `Updated v${nextVersionNumber}: Sharpened Ontario Ministry K/T/C/A rubric breakdown for MHF4U Advanced Functions & SBI3U Biology unit tests`;
+      revisedBody = `${existingProposalToRevise.asset_body}\n\n---\n### 📐 [v${nextVersionNumber} Refinement — Ontario K/T/C/A Achievement Chart Breakdown (MHF4U · MCR3U · SBI3U)]\n• **Knowledge & Understanding (K/U — 35% of mark):** Most students score 80%+ here because formulas are memorized.\n• **Thinking & Investigation (T/I — 30% of mark):** Where students who use ChatGPT at home drop to 50% on closed-book tests (${citedQuotesList[0]}).\n• **Communication (C — 15%) & Application (A — 20%):** Our 24/7 Socratic AI enforces full Ontario mathematical/scientific notation and step-by-step justification before unlocking the next hint, while the Human Learning Manager audits their weekly rubric readiness.`;
+    } else if (
+      lowerCmd.includes("challenge") ||
+      lowerCmd.includes("assumption") ||
+      lowerCmd.includes("devil")
+    ) {
+      changeSummaryPill = `Updated v${nextVersionNumber}: Stress-tested Devil's Advocate failure hypothesis & tightened 48-hour stop-loss pivot criteria`;
+      devilsAdvocate = {
+        primary_failure_hypothesis:
+          "Critical Challenge: Even if Ontario parents love the Socratic AI concept during the 10-minute debrief, 40%+ will stall if the teen themselves isn't present for the final 3 minutes of the call to agree to the 3x/week Socratic habit.",
+        blind_spot_question:
+          "Is the student required to sit beside the parent for Minutes 7–10 of the debrief to co-sign their weekly 3-session schedule with the Human Learning Manager?",
+      };
+      revisedBody = `${existingProposalToRevise.asset_body}\n\n---\n### 🛡️ [v${nextVersionNumber} Refinement — Devil's Advocate Counter-Measure Added]\n• **Teen Co-Commitment Protocol (Minute 8 of Debrief):** Before asking the parent to activate the $139 CAD/mo Tier 2 Managed Hybrid seat, the Human Learning Manager asks the student directly: *"Can you commit to three 25-minute Socratic sessions on Mon/Wed/Thu at 8:00 PM if it saves you 2 hours of pre-test cramming?"*`;
+    } else {
+      changeSummaryPill = `Updated v${nextVersionNumber}: Applied CMO directive ("${userCommand.slice(0, 48)}") & verified single-CTA compliance`;
+      revisedBody = `${existingProposalToRevise.asset_body}\n\n---\n### 🔄 [v${nextVersionNumber} CMO Refinement — ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}]\n**CMO Instruction:** "${userCommand}"\n\n• **VoC Grounding Reinforced:** Directly resolves ${citedQuotesList[0]}.\n• **Tier 2 Managed Hybrid Clarity ($139 CAD/month):** Emphasizes weekly Human Learning Manager accountability + 24/7 Socratic AI hints with zero exaggerated grade promises.\n• **Single Parent Action:** ${revisedSingleCta}`;
+    }
 
     const revisedSchema: MandatoryProposalSchema = {
       ...existingProposalToRevise,
       cited_voc_quotes: citedQuotesList,
+      single_cta: revisedSingleCta,
       asset_body: revisedBody,
-      revision_notes: `Revised via CMO chat ("${userCommand.slice(0, 75)}") — tightened $139 CAD/mo Tier 2 Managed Hybrid framing and cited ${citedQuotesList[0].split(" ")[0]}.`,
+      devils_advocate: devilsAdvocate,
+      revision_notes: changeSummaryPill,
     };
 
     const check = validateMandatoryProposalSchema(revisedSchema);
@@ -396,6 +432,7 @@ export async function generateMarketingResponse(
       assetTitle: revisedSchema.title,
       marketingContent: revisedSchema.asset_body,
       proposalSchema: revisedSchema,
+      changeSummaryPill,
       strategicJustification: {
         detailLevel,
         levelLabel:
@@ -404,203 +441,143 @@ export async function generateMarketingResponse(
             : detailLevel === 2
             ? "Level 2: Standard Rationale"
             : "Level 3: Deep Mentorship (The Why & How)",
-        headlineSummary: `Conversational HITL Revision Applied to "${revisedSchema.title}"`,
-        rationaleBody: `1. **Revision Summary:** ${revisedSchema.revision_notes}\n2. **VoC Citation Preserved:** Resolved ${citedQuotesList.join(" AND ")}.\n3. **Kill Criteria Maintained:** ${revisedSchema.kill_criteria.sample_threshold} -> Stop-loss at ${revisedSchema.kill_criteria.stop_loss_metric}.`,
+        headlineSummary: changeSummaryPill,
+        rationaleBody: `1. **What Changed in v${nextVersionNumber}:** ${changeSummaryPill}\n2. **Ontario VoC Preserved:** Anchored on ${citedQuotesList[0]}.\n3. **Ready for 30-Second Approval Dock:** Check the 3 verification boxes below (` + "`Ontario Context`, `Single CTA`, `Brand Trust`" + `) to lock and approve this asset.`,
         frameworksApplied: [
           selectedSkill.skill_name,
-          "HITL Conversational Refinement",
+          "Ontario K/T/C/A Alignment",
           activeStage,
         ],
         mentorshipTakeaway:
-          "Re-verify the Devil's Advocate Blind-Spot Question on the card before transitioning this proposal from DRAFT to APPROVED_FOR_EXECUTION.",
-        contextCacheStatus: `Context Cache HIT (${vocQuotes.length} VoC quotes + ${rates.completedToPaidPct}% Diag-to-Paid rate injected)`,
+          "Toggle 'Show Changes Diff' in the Left Pane header to compare v" +
+          (nextVersionNumber - 1) +
+          " against v" +
+          nextVersionNumber +
+          " side-by-side.",
+        contextCacheStatus: `Context Cache HIT (${vocQuotes.length} VoC quotes + ${rates.completedToPaidPct}% Diag-to-Paid rate)`,
       },
     };
   }
 
-  // Generate New Proposal tailored to ActiveBottleneckStage
+  // =========================================================================
+  // GENERATE NEW PROPOSAL FOR ACTIVE BOTTLENECK STAGE
+  // =========================================================================
   let proposalSchema: MandatoryProposalSchema;
 
   if (activeStage === "STAGE_1_CONVERSION") {
     proposalSchema = {
-      proposal_id: `PROP-S1-${Date.now().toString().slice(-5)}`,
-      title: `10-Min Parent Diagnostic Debrief Script & Cognitive Report Close ($139 CAD/mo Tier 2 Managed Hybrid)`,
+      proposal_id: `PROP-S1-${Date.now().toString().slice(-4)}`,
+      title: `10-Min Parent Debrief Script & K/T/C/A Cognitive Report Close ($139 CAD/mo Tier 2)`,
       bottleneck_stage: "STAGE_1_CONVERSION",
-      channel:
-        preferredPlatform === "Email Sequence"
-          ? "Post-Diagnostic 72-Hr Follow-Up Sequence (Email + SMS)"
-          : "1-on-1 Zoom Parent Debrief + Cognitive Diagnostic Report",
-      target_metric: `Diagnostic Completed -> Paid Conversion (Current: ${rates.completedToPaidPct}% -> Target: >= 25%)`,
+      channel: "Parent Call",
+      target_metric: `Diag → Paid ≥ 25% (Current: ${rates.completedToPaidPct}%)`,
       cited_voc_quotes: citedQuotesList,
       single_cta:
-        "Activate Your Teen's 30-Day Risk-Free Tier 2 Managed Hybrid Seat ($139 CAD/mo) Before Friday's Unit Test Study Plan Lock",
-      asset_body: `## 1. Cognitive Diagnostic Report Header (Shown on Screen During Minutes 0–3)
-**Student Course Focus:** ${courseFocus}
-**Diagnostic Finding:** Conceptual Understanding is **78%**, but **Multi-Step Application & Exam Execution Under Time Pressure is 48%** (Root cause of homework-to-test mark drops).
+        "Activate Your Teen's 30-Day Risk-Free Tier 2 Managed Hybrid Seat ($139 CAD/mo) Before Friday's MHF4U/SBI3U Study Plan Lock",
+      asset_body: `## 1. Cognitive Diagnostic Report Header (Minutes 0–2)
+**Ontario STEM Course Focus:** Grade 11/12 MHF4U (Advanced Functions) · MCR3U (Functions) · SBI3U (Biology)
+**Ontario K/T/C/A Diagnostic Breakdown:**
+- **Knowledge & Understanding (K/U):** **82%** (Strong formula recall on homework)
+- **Thinking, Investigation & Application (T/I & A):** **46%** (Stalls on multi-step closed-book unit test problems without AI hints)
 
 ---
 
-## 2. Minute-by-Minute 10-Minute Parent Debrief Call Script
-### Minutes 0–3: Validate the Exact Parent Frustration (VoC Mirroring)
-> *"When we looked at your child's diagnostic trace in ${courseFocus}, we saw the exact pattern most Ontario parents tell us about: ${citedQuotesList[0]}. Look at Question 4 on their Cognitive Report—they knew the formula, but when the word problem required 3 chained algebraic steps without an AI handing them step 1, they stalled at minute 2."*
+## 2. 10-Minute Parent Debrief Call Script
+### Minutes 0–3: Mirror Exact Parent VoC & Show Timestamped Socratic Trace
+> *"When we reviewed {{student_first_name}}'s diagnostic trace, we saw the exact pattern you described: ${citedQuotesList[0]}. Look at Question 4 on screen—when our Socratic AI withheld the final solution and asked for the domain constraint step, they paused for 110 seconds. That is the exact gap between their 90% homework mark and their 61% unit test mark."*
 
-### Minutes 3–6: Contrast the Two Failed Alternatives vs. Tier 2 Managed Hybrid ($139 CAD/mo)
-> *"If you hire an $80/hr tutor once a week ($320/month), nobody is there on Tuesday at 9:30 PM when they hit that wall. And if they use ChatGPT, it spits out the answer so they never build the neural pathway for Friday's closed-book test.*
+### Minutes 3–7: Contrast $380/mo Centres & ChatGPT vs. Tier 2 Managed Hybrid ($139 CAD/mo)
+> *"A $80/hr weekly tutor ($320+/mo) isn't there at 9:45 PM on Tuesday before Wednesday's unit test. And generic ChatGPT hands over the final answer so the student never builds independent exam stamina.*
 >
-> *That's why our **Tier 2 Managed Hybrid Plan ($139 CAD/month)** combines two things:*
-> 1. **24/7 Socratic AI STEM Coach:** Hard-coded NEVER to give the final answer. It prompts your teen with the exact guiding question they need at 9:30 PM.
-> 2. **Dedicated Human Learning Manager:** Reviews their Socratic session logs every week, sets their upcoming Ontario unit-test goals, and messages you a 60-second parent accountability scorecard."*
+> *Our **Tier 2 Managed Hybrid Plan ($139 CAD/month — $4.63/day)** pairs:*
+> 1. **24/7 Socratic AI STEM Coach:** Tuned to Ontario K/T/C/A rubrics. Never gives the final answer—prompts your teen with step-by-step guiding hints.
+> 2. **Dedicated Human Learning Manager:** Audits their Socratic logs weekly, sets unit-test milestones, and sends you a Friday parent progress check-in."*
 
-### Minutes 6–9: Neutralize the "Will My Teen Actually Use It?" Objection + 30-Day Guarantee
-> *"You also raised a critical point: ${citedQuotesList[1] || citedQuotesList[0]}. Under our **30-Day Active-Habit Guarantee**, if your Human Learning Manager cannot get your teen completing at least 3 Socratic problem sessions per week in their first 30 days, we refund 100% of your $139 CAD tuition immediately."*
-
-### Minute 10: Single Lock-Step Close
-👉 **Single Parent Action:** *"I have your child's first week of ${courseFocus} Socratic modules queued for this week's unit. Shall we activate their $139 CAD/mo Tier 2 Managed Hybrid seat now so their Human Learning Manager can run their onboarding check-in tomorrow?"*`,
+### Minutes 7–10: 30-Day Active-Habit Guarantee & Single Lock-Step Close
+> *"Under our **30-Day Active-Habit Guarantee**, if your Human Learning Manager does not get {{student_first_name}} completing at least 3 Socratic problem sessions per week in Month 1, we refund 100% of your $139 CAD tuition. Shall we lock their seat now so their Learning Manager can run tomorrow's onboarding?"*`,
       devils_advocate: {
         primary_failure_hypothesis:
-          "Ontario parents who just completed a free diagnostic may say 'Let me talk to my spouse and get back to you' if the Cognitive Report looks like a generic percentage score instead of showing a concrete timestamped clip of their teen stalling on a multi-step Ontario curriculum question.",
+          "Ontario parents may stall with 'Let me ask my spouse' if the 10-minute debrief talks abstractly about AI features rather than screen-sharing their teen's exact wrong step from the diagnostic within the first 90 seconds.",
         blind_spot_question:
-          "During the 10-minute debrief, does the presenter show the student's actual step-by-step Socratic error trace on screen within the first 90 seconds, or do they talk abstractly about features?",
+          "Does the presenter screen-share the student's actual timestamped Socratic stall before mentioning the $139 CAD/month price?",
       },
       kill_criteria: {
         sample_threshold: "12 completed 10-minute parent diagnostic debrief calls",
-        stop_loss_metric:
-          "< 20% same-call or 48-hour paid conversion into the $139 CAD/mo Tier 2 Managed Hybrid Plan",
+        stop_loss_metric: "< 20% paid conversion into $139 CAD/mo Tier 2 within 48 hours",
         pivot_action:
-          "Immediately switch from a full $139/mo upfront commitment on the call to a '$19 CAD 14-Day Unit-Test Rescue Sprint' that auto-upgrades to $139 CAD/mo on Day 15 unless cancelled.",
+          "Switch call close offer immediately from '$139 CAD/mo ongoing plan' to a '$19 CAD 14-Day Unit-Test Rescue Sprint' that auto-renews at $139 CAD/mo on Day 15.",
       },
       revision_notes:
-        "Initial Stage 1 generation grounded in WeeklyRealityLog VoC quotes and locked to Diagnostic-to-Paid >= 25% objective.",
+        "v1 Initial Stage 1 draft grounded in WeeklyRealityLog VoC quotes and Ontario K/T/C/A rubric.",
     };
   } else if (activeStage === "STAGE_2_REFERRAL_DIAG") {
     proposalSchema = {
-      proposal_id: `PROP-S2-${Date.now().toString().slice(-5)}`,
-      title: `Week 4 Report-Card Win Parent Referral Flow & MCR3U/SBI3U Unit-Test Seminar Kit`,
+      proposal_id: `PROP-S2-${Date.now().toString().slice(-4)}`,
+      title: `Week 4 Unit-Test Win Parent Referral Flow & MHF4U/SBI3U Community Seminar Kit`,
       bottleneck_stage: "STAGE_2_REFERRAL_DIAG",
-      channel: "Active Parent WhatsApp/SMS Trigger + GTA School Parent Community Seminar",
-      target_metric: "Referral & Community Seminar -> Diagnostic Booked (Target >= 40%)",
+      channel: "Community",
+      target_metric: "Referral & Seminar → Diag Booked ≥ 40%",
       cited_voc_quotes: citedQuotesList,
       single_cta:
-        "Forward Your Unique 'Gift a Free Ontario STEM Cognitive Diagnostic + 14-Day Socratic Pass' Link to 2 GTA Parent Friends",
+        "Forward Your 2 VIP 'Ontario K/T/C/A Cognitive Diagnostic + 14-Day Socratic Guest Passes' to 2 GTA Parent Friends",
       asset_body: `## 1. Week 4–6 "Unit-Test Win Moment" Parent Referral Trigger
-**Trigger Condition:** Fires automatically the evening an active Tier 2 ($139 CAD/mo) student completes their 10th Socratic AI session or logs a +10% unit test jump in ${courseFocus}.
+**Fires When:** Active Tier 2 ($139 CAD/mo) student logs a +10% unit-test jump or completes 10 unassisted Socratic STEM chains in MHF4U, MCR3U, or SBI3U.
 
-### WhatsApp / SMS Message from Human Learning Manager to Parent:
-> *"Hi {{parent_first_name}}! Quick win to share: {{student_first_name}} solved 4 multi-step ${courseFocus} problems independently tonight using only 1 Socratic hint (down from 4 hints in Week 1).*
+### Message from Human Learning Manager to Parent:
+> *"Hi {{parent_first_name}} — great milestone tonight: {{student_first_name}} solved 4 multi-step Thinking & Application (T/A) problems in MHF4U using only 1 Socratic hint (down from 4 hints in Week 1).*
 >
-> *Most parents tell us before joining: ${citedQuotesList[0]}. Since you know 2 or 3 other Ontario parents stressing over ${courseFocus} midterms right now, I unlocked **2 VIP Guest Passes** under your name. It gives their teen our full 20-Min Cognitive Diagnostic + 14 days of Managed Socratic AI free—and takes $50 CAD off your next $139/mo renewal for each family who books their diagnostic."*
-
----
-
-## 2. Forwardable 1-Tap Message for the Parent to Paste into Parent Group Chats:
-> *"Hey! A few of us were talking about ${courseFocus} marks—we switched from $80/hr weekly tutoring to MindLC ($139/mo for a dedicated Human Learning Manager + 24/7 Socratic AI that gives hints instead of just spitting out answers like ChatGPT). Our Learning Manager gave me 2 free passes for a full Ontario Math/STEM Diagnostic if you want to grab one for your teen before the next unit test: {{referral_link}}"*`,
+> *Most parents tell us before joining: ${citedQuotesList[0]}. I just unlocked **2 VIP Diagnostic Guest Passes** under your family's name for any Mississauga, Oakville, or Markham parent friends stressing over upcoming unit tests. Each pass includes a full 20-Min Cognitive Diagnostic + 14 days of Managed Socratic AI—and credits $50 CAD toward your next $139/mo billing cycle."*`,
       devils_advocate: {
         primary_failure_hypothesis:
-          "Ontario parents rarely forward marketing links in private school WhatsApp groups if the message sounds like an affiliate pitch rather than a scarce, high-status academic diagnostic pass from their child's Learning Manager.",
+          "Ontario parents hesitate to share referral links in private school WhatsApp groups if the message reads like a promotional discount coupon rather than an exclusive academic assessment pass from their child's Learning Manager.",
         blind_spot_question:
-          "Are we triggering this ask immediately after a concrete student micro-win (a specific unit test or Socratic streak), or sending it as a generic monthly blast?",
+          "Is this referral prompt sent within 2 hours of a verified student micro-win (unit test score or Socratic streak)?",
       },
       kill_criteria: {
-        sample_threshold: "30 active Week 4–6 parents prompted by their Human Learning Manager",
-        stop_loss_metric: "< 25% of prompted parents share a guest pass OR < 40% of referred leads book a diagnostic",
+        sample_threshold: "30 active Week 4–6 parents messaged by their Human Learning Manager",
+        stop_loss_metric: "< 25% pass-share rate OR < 40% of referred families booking a diagnostic",
         pivot_action:
-          "Pivot from 1-to-1 referral links to a live 30-minute Sunday evening 'Ontario Grade 11/12 MCR3U & SBI3U Midterm Survival Parent Clinic' where current parents invite 1 friend directly.",
+          "Pivot immediately to a live 30-minute Sunday evening 'Ontario Grade 11/12 MHF4U & SBI3U Unit-Test Survival Clinic' co-hosted by our Lead Learning Manager.",
       },
       revision_notes:
-        "Initial Stage 2 generation locked to Referral & Seminar -> Diagnostic Booked >= 40%.",
+        "v1 Initial Stage 2 referral & community diagnostic flow.",
     };
   } else {
-    // STAGE_3_SCALE_ADS (61-100 Paid Students)
     proposalSchema = {
-      proposal_id: `PROP-S3-${Date.now().toString().slice(-5)}`,
-      title: `GTA Geo-Targeted (Mississauga, Oakville, Markham, Toronto) Meta Ad Set — $139 CAD/mo vs. $380/mo Centres`,
+      proposal_id: `PROP-S3-${Date.now().toString().slice(-4)}`,
+      title: `GTA Geo-Targeted (Mississauga · Oakville · Markham) Meta Ad Variant — $139/mo vs. $380/mo Centres`,
       bottleneck_stage: "STAGE_3_SCALE_ADS",
-      channel: "Meta (Facebook & Instagram) Geo-Targeted GTA Parent Feed",
-      target_metric: "Blended Paid Student CAC < $150 CAD (Diag-to-Paid >= 25% maintained)",
+      channel: "Meta Ad",
+      target_metric: "Blended CAC < $150 CAD (Diag → Paid ≥ 25%)",
       cited_voc_quotes: citedQuotesList,
       single_cta:
-        "Book Your Teen's Free 20-Minute Ontario STEM Cognitive Diagnostic (Mississauga · Oakville · Markham · Toronto)",
-      asset_body: `## 📣 GTA Parent Meta Ad Variant A — The "9:45 PM Homework Freeze" Hook
-**Geo-Target:** Mississauga, Oakville, Markham, North York, Richmond Hill (Parents 38–55)
+        "Book Your Teen's Free 20-Minute Ontario K/T/C/A STEM Cognitive Diagnostic",
+      asset_body: `## 📣 GTA Parent Meta Ad — "The 9:45 PM MHF4U / SBI3U Homework Wall"
+**Geo-Target:** Mississauga, Oakville, Markham, Richmond Hill, North York (Parents 38–55)
 
-**Primary Text:**
 ${citedQuotesList[0]}
 
-If you're a parent in the GTA with a teen in ${courseFocus}, you already know the two traps:
-❌ **$80/hr Private Tutors ($320+/mo):** Great on Sunday afternoon, nowhere to be found on Tuesday at 9:45 PM before Wednesday's unit test.
-❌ **Generic ChatGPT / Photo-Solvers:** Spits out the final answer in 2 seconds—so your teen finishes the worksheet without thinking and blanks out on the real closed-book test.
+Why GTA families are replacing $380/mo worksheet centres and $80/hr once-a-week tutors with **MindLC Tier 2 Managed Hybrid ($139 CAD/month)**:
+1. **24/7 Socratic AI STEM Coach:** Aligned to Ontario K/T/C/A rubrics (MPM2D, MCR3U, MHF4U, MCV4U, SBI3U). Guides your teen step-by-step at 9:45 PM without ever handing over the final answer.
+2. **Dedicated Human Learning Manager:** Weekly study plan accountability + Friday parent progress reports.
 
-✅ **The MindLC Tier 2 Managed Hybrid Plan ($139 CAD/month):**
-1. **24/7 Socratic AI STEM Coach:** Trained on Ontario Ministry course codes (MPM2D, MCR3U, MHF4U, MCV4U, SBI3U). Never hands over the answer—asks step-by-step guiding questions until your child solves it independently.
-2. **Dedicated Human Learning Manager:** Holds your teen accountable every week and sends you clear parent progress reports.
-
-👉 **Headline:** Replace $350/mo Tutoring With 24/7 Socratic AI + Human Accountability ($139 CAD/mo)
-👉 **Single CTA Button:** Book Your Free 20-Min Ontario STEM Cognitive Diagnostic →`,
+👉 **Single CTA:** Book Your Free 20-Min Ontario STEM Cognitive Diagnostic →`,
       devils_advocate: {
         primary_failure_hypothesis:
-          "GTA Meta CPMs for education audiences can spike above $45 CAD during midterm weeks, pushing Cost Per Booked Diagnostic above $38 CAD and breaching the $150 CAD Blended CAC ceiling if landing page bounce rate exceeds 65%.",
+          "GTA education CPMs can exceed $45 CAD during exam weeks, driving Cost Per Booked Diagnostic over $35 CAD if the landing page doesn't mirror the exact Ontario course code from the ad.",
         blind_spot_question:
-          "Does the landing page hero immediately display the exact Ontario course code (MCR3U / MHF4U / MPM2D) from the ad's UTM parameter above the fold?",
+          "Does the landing page headline dynamically inject the exact course code (MHF4U / MCR3U / SBI3U) clicked in the ad?",
       },
       kill_criteria: {
-        sample_threshold: "1,500 GTA parent impressions OR $150 CAD ad spend per creative variant",
-        stop_loss_metric: "Outbound CTR < 1.2% OR Cost Per Completed Diagnostic > $35 CAD (Blended CAC > $150 CAD)",
+        sample_threshold: "1,000 impressions OR $150 CAD spend per ad creative",
+        stop_loss_metric: "Outbound CTR < 1.2% OR Cost Per Completed Diagnostic > $35 CAD",
         pivot_action:
-          "Kill underperforming ad variant within 24 hours and reallocate 100% of daily budget to top-converting GTA postal-code cluster (Oakville/Markham Grade 11 MCR3U).",
+          "Pause creative automatically and reallocate budget to the highest-converting GTA postal code cluster.",
       },
       revision_notes:
-        "Initial Stage 3 GTA ad scaling proposal locked to Blended CAC < $150 CAD.",
+        "v1 Initial Stage 3 GTA ad creative with $150 CAD Blended CAC stop-loss.",
     };
   }
-
-  // Enforce schema validation before returning
-  const validation = validateMandatoryProposalSchema(proposalSchema);
-  if (!validation.valid) {
-    throw new Error(
-      `MandatoryProposalSchema validation failed: missing ${validation.missingFields.join(", ")}`
-    );
-  }
-
-  const levelMap = {
-    1: {
-      levelLabel: "Level 1: Executive Summary (Fast)" as const,
-      headlineSummary: `[${activeStage}] Drafted "${proposalSchema.title}" targeting ${proposalSchema.target_metric}.`,
-      rationaleBody: `• **VoC Resolved:** ${proposalSchema.cited_voc_quotes[0]}\n• **Devil's Advocate Risk:** ${proposalSchema.devils_advocate.primary_failure_hypothesis}\n• **Kill Criteria:** ${proposalSchema.kill_criteria.sample_threshold} -> Stop-loss at ${proposalSchema.kill_criteria.stop_loss_metric}.`,
-      frameworksApplied: [
-        selectedSkill.skill_name,
-        activeStage,
-        "Mandatory Proposal Schema v2",
-      ],
-      contextCacheStatus: `Context Cache HIT (${vocQuotes.length} VoC quotes + ${rates.completedToPaidPct}% Diag-to-Paid rate)`,
-    },
-    2: {
-      levelLabel: "Level 2: Standard Rationale" as const,
-      headlineSummary: `[${activeStage}] How "${proposalSchema.title}" Resolves Ground-Truth Parent Objections`,
-      rationaleBody: `1. **Bottleneck Discipline:** Locked strictly to **${BOTTLENECK_STAGE_CONFIGS[activeStage].lockedObjective}**.\n2. **Direct VoC Injection:** Built around verbatim parent quotes from your Weekly Reality Log (${proposalSchema.cited_voc_quotes.join(" ; ")}).\n3. **Pre-Registered Stop-Loss:** Prevents sunk-cost fallacy by enforcing an automatic pivot (${proposalSchema.kill_criteria.pivot_action}) if ${proposalSchema.kill_criteria.stop_loss_metric} after ${proposalSchema.kill_criteria.sample_threshold}.`,
-      frameworksApplied: [
-        selectedSkill.skill_name,
-        activeStage,
-        "VoC Context Injection",
-        "Pre-Committed Kill Criteria",
-      ],
-      mentorshipTakeaway: `Before approving this proposal on the Left Canvas, answer the Devil's Advocate Blind-Spot Question: "${proposalSchema.devils_advocate.blind_spot_question}"`,
-      contextCacheStatus: `Context Cache HIT (${vocQuotes.length} VoC quotes + ${rates.completedToPaidPct}% Diag-to-Paid rate)`,
-    },
-    3: {
-      levelLabel: "Level 3: Deep Mentorship (The Why & How)" as const,
-      headlineSummary: `Deep CMO Mentorship: Unit Economics ($139 CAD/mo Tier 2), VoC Anchoring & Falsifiable Kill Criteria`,
-      rationaleBody: `1. **Why This Bottleneck Stage Comes First (${activeStage}):**\n   • At your current funnel metrics (${funnelMetrics.diag_completed} diagnostics completed -> ${funnelMetrics.paid_conversions} paid = **${rates.completedToPaidPct}% conversion**), every 5% lift in \`Diag Completed -> Paid\` compounds the ROI of every future referral and GTA ad dollar.\n\n2. **Voice-of-Customer (VoC) Psychological Reframing:**\n   • By quoting exact parent fears (${proposalSchema.cited_voc_quotes[0]}), we shift the $139 CAD/month Tier 2 Managed Hybrid offer from "another AI subscription" to "a $4.63/day replacement for $350/mo worksheet centres and absent $80/hr weekly tutors."\n\n3. **Devil's Advocate & Stop-Loss Rigor:**\n   • Amateur marketers fall in love with their copy; disciplined CMOs pre-commit to a **Kill Threshold** (${proposalSchema.kill_criteria.sample_threshold} / ${proposalSchema.kill_criteria.stop_loss_metric}) and an immediate **Pivot Action** (${proposalSchema.kill_criteria.pivot_action}).`,
-      frameworksApplied: [
-        selectedSkill.skill_name,
-        activeStage,
-        "JTBD Four Forces",
-        "Devil's Advocate Falsification",
-        "Stop-Loss Unit Economics ($139 CAD/mo)",
-      ],
-      mentorshipTakeaway: `Verify the Blind-Spot Question ("${proposalSchema.devils_advocate.blind_spot_question}") and check both HITL Safeguard boxes on the Left Card to unlock the Approve button.`,
-      contextCacheStatus: `Context Cache HIT (${vocQuotes.length} VoC quotes + ${rates.completedToPaidPct}% Diag-to-Paid rate)`,
-    },
-  };
 
   return {
     protocolVersion: "2.0-MINDLC-HITL",
@@ -608,17 +585,29 @@ If you're a parent in the GTA with a teen in ${courseFocus}, you already know th
     assetTitle: proposalSchema.title,
     marketingContent: proposalSchema.asset_body,
     proposalSchema,
+    changeSummaryPill: `Created v1: Grounded in ${proposalSchema.cited_voc_quotes.length} VoC quotes (${activeStage})`,
     strategicJustification: {
       detailLevel,
-      ...levelMap[detailLevel],
+      levelLabel:
+        detailLevel === 1
+          ? "Level 1: Executive Summary (Fast)"
+          : detailLevel === 2
+          ? "Level 2: Standard Rationale"
+          : "Level 3: Deep Mentorship (The Why & How)",
+      headlineSummary: `Drafted "${proposalSchema.title}" (${activeStage})`,
+      rationaleBody: `1. **Bottleneck Focus:** Strictly aligned to **${BOTTLENECK_STAGE_CONFIGS[activeStage].shortLabel}**.\n2. **VoC Grounding:** Cites ${proposalSchema.cited_voc_quotes.join(" ; ")}.\n3. **30-Second Approval Ready:** Review the Devil's Advocate & Kill Criteria callouts on the Left Pane, then check the 3 boxes in the sticky bottom dock to lock the asset.`,
+      frameworksApplied: [
+        selectedSkill.skill_name,
+        activeStage,
+        "Ontario K/T/C/A Rubric",
+      ],
+      mentorshipTakeaway:
+        "Use the 3 quick-steer chips below ('Soften sales tone', 'Sharpen Ontario K/T/C/A angle', 'Challenge my assumption') to iterate before approving.",
+      contextCacheStatus: `Context Cache HIT (${vocQuotes.length} VoC quotes + ${rates.completedToPaidPct}% Diag-to-Paid rate)`,
     },
   };
 }
 
-/**
- * Autonomous Agent Task Executor — now wraps every agent output in the
- * MandatoryProposalSchema (with VoC citations, Devil's Advocate, and Kill Criteria).
- */
 export async function executeAutonomousAgentTask(params: {
   activity: PlannedActivity;
   agent: MarketingAgent;
@@ -662,8 +651,8 @@ export async function executeAutonomousAgentTask(params: {
   const customizedSchema: MandatoryProposalSchema = {
     ...generated.proposalSchema,
     proposal_id: `PROP-${agent.codeName.split(" ")[0].toUpperCase()}-${Date.now().toString().slice(-4)}`,
-    title: `[${agent.codeName} · ${activity.horizon}] ${activity.title}`,
-    channel: `${activity.targetPlatform} (${activity.courseCodesTargeted.join(" · ")})`,
+    title: `[${agent.codeName}] ${activity.title}`,
+    channel: activity.targetPlatform,
     target_metric: activity.targetKpi,
   };
 
@@ -672,7 +661,7 @@ export async function executeAutonomousAgentTask(params: {
     platform: activity.targetPlatform,
     content: customizedSchema.asset_body,
     proposalSchema: customizedSchema,
-    agentReport: `${agent.codeName} generated schema-validated proposal "${customizedSchema.title}" citing ${customizedSchema.cited_voc_quotes.length} VoC quotes with pre-registered Kill Criteria (${customizedSchema.kill_criteria.sample_threshold}).`,
+    agentReport: `${agent.codeName} drafted "${customizedSchema.title}" citing ${customizedSchema.cited_voc_quotes.length} VoC quotes.`,
   };
 }
 
@@ -696,7 +685,7 @@ export async function evaluateCmoPlanQuestionAndAdjust(params: {
     activeStage = "STAGE_1_CONVERSION",
     paidStudents = 14,
   } = params;
-  await new Promise((r) => setTimeout(r, 400));
+  await new Promise((r) => setTimeout(r, 380));
 
   const q = question.toLowerCase();
   const targetHorizon: PlanHorizon =
@@ -718,39 +707,16 @@ export async function evaluateCmoPlanQuestionAndAdjust(params: {
   const act1: PlannedActivity = {
     id: `plan-cmo-${nowId}-1`,
     horizon: targetHorizon,
-    timeWindow: `${targetHorizon} Priority #1 (CMO Adjusted · ${activeStage})`,
-    title:
-      activeStage === "STAGE_1_CONVERSION"
-        ? `Stage 1 Conversion Fix: ${question.slice(0, 58)} (10-Min Debrief & $139 CAD/mo Guarantee)`
-        : activeStage === "STAGE_2_REFERRAL_DIAG"
-        ? `Stage 2 Referral & Seminar Play: ${question.slice(0, 55)}`
-        : `Stage 3 GTA Ad Scale Play: ${question.slice(0, 58)}`,
-    tacticalExecution: `Aligned strictly to ${stageCfg.lockedObjective} (${paidStudents}/100 paid students). Execute allowed stage play (${stageCfg.allowedProposalTypes.slice(0, 2).join(" + ")}) while citing latest WeeklyRealityLog parent objections and enforcing 48-hour Stop-Loss Kill Criteria.`,
-    deliverableSpec: `${stageCfg.allowedProposalTypes[0]} + Devil's Advocate & Kill Criteria Spec`,
-    marketTrigger: `CMO Directive ("${question.slice(0, 50)}") under ${activeStage}`,
-    courseCodesTargeted: ["MPM2D", "MCR3U", "MHF4U", "SBI3U"],
-    assignedAgentId:
-      activeStage === "STAGE_1_CONVERSION"
-        ? "agent-cro"
-        : activeStage === "STAGE_2_REFERRAL_DIAG"
-        ? "agent-lifecycle"
-        : "agent-social",
-    skillName:
-      activeStage === "STAGE_1_CONVERSION"
-        ? "cro"
-        : activeStage === "STAGE_2_REFERRAL_DIAG"
-        ? "copywriting"
-        : "social-content",
-    targetPlatform:
-      activeStage === "STAGE_1_CONVERSION"
-        ? "Cognitive Report & Debrief Script"
-        : activeStage === "STAGE_2_REFERRAL_DIAG"
-        ? "Parent Referral & Seminar Kit"
-        : "Facebook",
-    funnelObjective:
-      activeStage === "STAGE_1_CONVERSION"
-        ? "Conversion Optimization"
-        : "Lead Generation",
+    timeWindow: `${targetHorizon} Priority #1 (${activeStage})`,
+    title: `${stageCfg.shortLabel.split(":")[0]} Play: ${question.slice(0, 62)}`,
+    tacticalExecution: `Locked to ${stageCfg.lockedObjective} (${paidStudents}/100 students). Execute allowed stage play (${stageCfg.allowedProposalTypes.slice(0, 2).join(" + ")}) citing WeeklyRealityLog parent objections and enforcing 48-hr stop-loss.`,
+    deliverableSpec: `${stageCfg.allowedProposalTypes[0]} + Devil's Advocate & Kill Criteria`,
+    marketTrigger: `CMO Directive ("${question.slice(0, 48)}")`,
+    courseCodesTargeted: ["MHF4U", "SBI3U", "MCR3U", "MPM2D"],
+    assignedAgentId: "agent-cro",
+    skillName: "cro",
+    targetPlatform: "Parent Call",
+    funnelObjective: "Conversion Optimization",
     targetKpi: stageCfg.targetBenchmark,
     status: "Queued",
     adjustedByCmo: true,
@@ -760,10 +726,10 @@ export async function evaluateCmoPlanQuestionAndAdjust(params: {
 
   return {
     horizonAffected: targetHorizon,
-    strategistAnswer: `**CMO Plan Re-Calibration (Enforcing ${activeStage} at ${paidStudents}/100 Paid Students):**\n1. **Bottleneck Filter Applied:** Because MindLC is currently in **${stageCfg.label}**, all newly injected tasks are locked to **${stageCfg.lockedObjective}**.\n2. **Task Injected into ${targetHorizon} Schedule:** Dispatched specialist agent to produce a schema-validated proposal with VoC quote citations, Devil's Advocate blind-spot check, and hard Kill Criteria.`,
+    strategistAnswer: `**CMO Plan Re-Calibration (${activeStage} · ${paidStudents}/100 Paid Students):**\nLocked strictly to **${stageCfg.lockedObjective}**. Dispatched task to your ${targetHorizon} queue.`,
     newActivities: [act1],
     adjustmentSummary: [
-      `Injected [${targetHorizon}] ${activeStage} Task: "${act1.title}" (Target: ${stageCfg.targetBenchmark})`,
+      `Added [${targetHorizon}] Task: "${act1.title}" (${stageCfg.targetBenchmark})`,
     ],
   };
 }

@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
-import { useMarketingStore } from "@/store/useMarketingStore";
+import React, { useState, useEffect } from "react";
+import { useMarketingStore, NavigationTab } from "@/store/useMarketingStore";
 import {
   BOTTLENECK_STAGE_CONFIGS,
   computeFunnelRates,
@@ -10,30 +10,38 @@ import { VoCContextTag } from "@/types/database";
 import {
   Lock,
   Unlock,
-  ShieldAlert,
-  Target,
-  Quote,
+  ChevronDown,
+  ArrowRight,
   Plus,
   CheckCircle2,
-  AlertOctagon,
-  SlidersHorizontal,
+  AlertTriangle,
   X,
+  GraduationCap,
+  Layers,
+  Bot,
+  Radar,
+  BookOpen,
+  Sliders,
 } from "lucide-react";
 
-const CONTEXT_TAGS: VoCContextTag[] = [
-  "ai_cheating",
-  "price",
-  "student_motivation",
-  "curriculum",
-  "trust",
+const CONTEXT_TAGS: { id: VoCContextTag; label: string }[] = [
+  { id: "trust", label: "Trust" },
+  { id: "ai_cheating", label: "AI Cheating" },
+  { id: "price", label: "Price" },
+  { id: "curriculum", label: "Curriculum" },
+  { id: "student_motivation", label: "Student Motivation" },
 ];
 
 export function SafeguardTopBar() {
   const {
+    activeTab,
+    setActiveTab,
     realityGateStatus,
     pilotWeek0Used,
     weeklyRealityLogs,
     isRealityGateModalOpen,
+    isSampleSeedActive,
+    diagnosticToast,
     paidStudentCount,
     activeBottleneckStage,
     setRealityGateModalOpen,
@@ -41,80 +49,90 @@ export function SafeguardTopBar() {
     submitWeeklyRealityLog,
     activatePilotWeek0Override,
     setPaidStudentCount,
+    clearDiagnosticToast,
   } = useMarketingStore();
 
+  const [isBottleneckPopoverOpen, setIsBottleneckPopoverOpen] = useState(false);
+
   const latestLog = weeklyRealityLogs[0];
-  const rates = latestLog
-    ? computeFunnelRates(latestLog.funnel_metrics)
-    : { contactToBookedPct: 0, bookedToCompletedPct: 0, completedToPaidPct: 0 };
+  const metrics = latestLog?.funnel_metrics || {
+    reach_or_contacts: 64,
+    diag_booked: 18,
+    diag_completed: 14,
+    paid_conversions: 2,
+  };
+  const rates = computeFunnelRates(metrics);
   const stageCfg = BOTTLENECK_STAGE_CONFIGS[activeBottleneckStage];
 
-  // Modal Form State for 60-Second Weekly Reality Log
+  // Identify the single lowest conversion rate in the 3 transitions to highlight in Amber/Rose
+  const stepRates = [
+    { key: "booked", pct: rates.contactToBookedPct, target: 25 },
+    { key: "done", pct: rates.bookedToCompletedPct, target: 75 },
+    { key: "paid", pct: rates.completedToPaidPct, target: 25 },
+  ];
+  const lowestStepKey = [...stepRates].sort((a, b) => a.pct - b.pct)[0]?.key;
+
+  // 60-Second Weekly Reality Gate Modal Form State
   const [weekStart, setWeekStart] = useState(
     new Date().toISOString().split("T")[0]
   );
-  const [reach, setReach] = useState(
-    latestLog?.funnel_metrics.reach_or_contacts || 70
-  );
-  const [booked, setBooked] = useState(
-    latestLog?.funnel_metrics.diag_booked || 20
-  );
-  const [completed, setCompleted] = useState(
-    latestLog?.funnel_metrics.diag_completed || 16
-  );
-  const [paid, setPaid] = useState(
-    latestLog?.funnel_metrics.paid_conversions || 4
-  );
+  const [reach, setReach] = useState(metrics.reach_or_contacts);
+  const [booked, setBooked] = useState(metrics.diag_booked);
+  const [completed, setCompleted] = useState(metrics.diag_completed);
+  const [paid, setPaid] = useState(metrics.paid_conversions);
   const [touchpoint, setTouchpoint] = useState(
     latestLog?.top_winning_touchpoint ||
-      "10-min Zoom parent debrief showing the student's timestamped Socratic stall on MCR3U Question 4"
+      "10-min Zoom parent debrief screen-sharing the student's timestamped Socratic stall on Question 4 (MHF4U)"
   );
   const [quotes, setQuotes] = useState<
     { quote_text: string; context_tag: VoCContextTag }[]
   >([
     {
       quote_text:
-        "My son already uses ChatGPT to finish homework in 5 minutes and then gets 58% on his MCR3U Functions unit test.",
+        "My son already uses ChatGPT to finish homework in 5 minutes and then gets 56% on his MHF4U Advanced Functions unit test.",
       context_tag: "ai_cheating",
     },
     {
       quote_text:
-        "We already burned $380/month at Mathnasium—how do I know $139/month won't just be another subscription he ignores?",
-      context_tag: "price",
+        "Her teacher marks Ontario K/T/C/A Thinking and Application questions strictly—generic tutoring worksheets don't match Grade 11 SBI3U or MCR3U tests.",
+      context_tag: "curriculum",
     },
   ]);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const handleAddQuoteField = () => {
-    setQuotes([
-      ...quotes,
-      { quote_text: "", context_tag: "student_motivation" },
-    ]);
-  };
+  // Live modal conversion % calculation as the user types
+  const modalLiveRates = computeFunnelRates({
+    reach_or_contacts: Number(reach) || 0,
+    diag_booked: Number(booked) || 0,
+    diag_completed: Number(completed) || 0,
+    paid_conversions: Number(paid) || 0,
+  });
 
-  const handleQuoteChange = (
-    idx: number,
-    field: "quote_text" | "context_tag",
-    val: string
-  ) => {
-    setQuotes(
-      quotes.map((q, i) =>
-        i === idx
-          ? {
-              ...q,
-              [field]: val,
-            }
-          : q
-      )
-    );
-  };
+  // Esc key handler to close modals & popovers
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setRealityGateModalOpen(false);
+        setIsBottleneckPopoverOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [setRealityGateModalOpen]);
+
+  // Auto-dismiss diagnostic toast after 7 seconds
+  useEffect(() => {
+    if (!diagnosticToast) return;
+    const t = setTimeout(() => clearDiagnosticToast(), 7000);
+    return () => clearTimeout(t);
+  }, [diagnosticToast, clearDiagnosticToast]);
 
   const handleSubmitRealityCheck = (e: React.FormEvent) => {
     e.preventDefault();
-    const validQuotes = quotes.filter((q) => q.quote_text.trim().length >= 10);
+    const validQuotes = quotes.filter((q) => q.quote_text.trim().length >= 8);
     if (validQuotes.length < 2) {
       setFormError(
-        "Safeguard 1 Requirement: You must log at least 2 verbatim, unedited parent quotes/objections heard this week."
+        "Please enter at least 2 exact, unedited verbatim parent quotes or objections heard this week."
       );
       return;
     }
@@ -138,168 +156,369 @@ export function SafeguardTopBar() {
 
   const isLocked = realityGateStatus === "LOCKED";
 
+  // Segmented progress bar calculation across 0->25 (Stage 1), 26->60 (Stage 2), 61->100 (Stage 3)
+  const seg1Pct = Math.min(100, Math.round((paidStudentCount / 25) * 100));
+  const seg2Pct =
+    paidStudentCount > 25
+      ? Math.min(100, Math.round(((paidStudentCount - 25) / 35) * 100))
+      : 0;
+  const seg3Pct =
+    paidStudentCount > 60
+      ? Math.min(100, Math.round(((paidStudentCount - 60) / 40) * 100))
+      : 0;
+
+  const secondaryViews: { id: NavigationTab; label: string; icon: React.ReactNode }[] = [
+    { id: "copilot", label: "CMO Cockpit", icon: <Layers className="w-3.5 h-3.5" /> },
+    { id: "planner", label: "5-Horizon Planner & Agents", icon: <Bot className="w-3.5 h-3.5" /> },
+    { id: "intel", label: "Market & Competitor Intel", icon: <Radar className="w-3.5 h-3.5" /> },
+    { id: "skills", label: "Skill Library", icon: <BookOpen className="w-3.5 h-3.5" /> },
+    { id: "settings", label: "Persona & Schema", icon: <Sliders className="w-3.5 h-3.5" /> },
+  ];
+
   return (
     <>
-      {/* Persistent Conversion Safeguards Ribbon */}
-      <div className="bg-slate-950 text-slate-100 border-b border-slate-800 px-6 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs">
-        {/* Left: Safeguard 1 — Weekly Reality Gate Status */}
-        <div className="flex flex-wrap items-center gap-3">
+      {/* =====================================================================
+          LEVEL 1: MACRO COMMAND STRIP (Sticky Top Bar — Height ~72px)
+          ===================================================================== */}
+      <header className="sticky top-0 z-30 h-[72px] bg-white border-b border-slate-200 px-5 flex items-center justify-between gap-4 select-none shadow-2xs">
+        {/* MODULE 1: Brand + North Star Progress Pill (Paid Students: X / 100 with 25/60/100 milestones) */}
+        <div className="flex items-center gap-3.5 shrink-0">
           <div
-            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-bold border ${
-              isLocked
-                ? "bg-red-500/20 text-red-300 border-red-500/40 animate-pulse"
-                : realityGateStatus === "PILOT_WEEK_0_OVERRIDE"
-                ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
-                : "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
-            }`}
+            onClick={() => setActiveTab("copilot")}
+            className="flex items-center gap-2.5 cursor-pointer"
           >
-            {isLocked ? (
-              <>
-                <Lock className="w-3.5 h-3.5" />
-                REALITY GATE: LOCKED
-              </>
-            ) : (
-              <>
-                <Unlock className="w-3.5 h-3.5" />
-                REALITY GATE:{" "}
-                {realityGateStatus === "PILOT_WEEK_0_OVERRIDE"
-                  ? "PILOT WEEK 0 OVERRIDE"
-                  : `UNLOCKED (${latestLog?.week_start_date})`}
-              </>
-            )}
+            <div className="w-9 h-9 rounded-lg bg-slate-900 text-white flex items-center justify-center">
+              <GraduationCap className="w-5 h-5 text-indigo-400" />
+            </div>
+            <div className="hidden sm:block">
+              <div className="text-sm font-bold tracking-tight text-slate-900 leading-none">
+                MindLC
+              </div>
+              <div className="text-[10px] font-medium text-slate-500 mt-0.5">
+                $139/mo Hybrid Cockpit
+              </div>
+            </div>
           </div>
 
+          <div className="h-7 w-[1px] bg-slate-200 hidden sm:block" />
+
+          {/* North Star Progress Pill */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-1.5 flex items-center gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-slate-600">
+                  Paid Students:
+                </span>
+                <span className="text-sm font-extrabold text-slate-900 tabular-nums">
+                  {paidStudentCount} <span className="text-slate-400 font-normal">/ 100</span>
+                </span>
+              </div>
+              {/* Sleek 3-Segment Progress Bar (25 · 60 · 100) */}
+              <div className="flex items-center gap-1 mt-1 w-36">
+                <div
+                  className="h-1.5 flex-1 bg-slate-200 rounded-l-full overflow-hidden"
+                  title="Stage 1 Milestone: 25 Students"
+                >
+                  <div
+                    className="h-full bg-indigo-600 transition-all"
+                    style={{ width: `${seg1Pct}%` }}
+                  />
+                </div>
+                <div
+                  className="h-1.5 flex-1 bg-slate-200 overflow-hidden"
+                  title="Stage 2 Milestone: 60 Students"
+                >
+                  <div
+                    className="h-full bg-indigo-600 transition-all"
+                    style={{ width: `${seg2Pct}%` }}
+                  />
+                </div>
+                <div
+                  className="h-1.5 flex-1 bg-slate-200 rounded-r-full overflow-hidden"
+                  title="Stage 3 Milestone: 100 Students"
+                >
+                  <div
+                    className="h-full bg-emerald-600 transition-all"
+                    style={{ width: `${seg3Pct}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="text-[10px] font-mono text-slate-400 leading-tight hidden xl:block">
+              <div>25 · 60 · 100</div>
+              <div className="text-slate-600 font-semibold tabular-nums">
+                ${(paidStudentCount * 139).toLocaleString()} MRR
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* MODULE 2: Active Bottleneck Lock Badge (Clickable Popover for Allowed vs Blocked Scope) */}
+        <div className="relative shrink-0">
           <button
-            onClick={() => setRealityGateModalOpen(true)}
-            className="px-2.5 py-1 rounded-lg bg-teal-600 hover:bg-teal-500 text-white font-bold transition"
+            type="button"
+            onClick={() => setIsBottleneckPopoverOpen(!isBottleneckPopoverOpen)}
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-100/80 border border-amber-300 text-amber-950 text-xs font-bold transition"
           >
-            {isLocked
-              ? "🔓 Submit 60-Sec Weekly Reality Log"
-              : "📊 Update Weekly Reality Log / VoC"}
+            <span>🔒 {stageCfg.shortLabel}</span>
+            <ChevronDown className="w-3.5 h-3.5 text-amber-700" />
           </button>
 
-          <button
-            onClick={toggleRealityGateLockSimulation}
-            title="Toggle between LOCKED and UNLOCKED to test Safeguard 1 Data-Locked Generation"
-            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-medium transition"
-          >
-            {isLocked ? "Simulate Unlock" : "Simulate Gate Lock"}
-          </button>
+          {isBottleneckPopoverOpen && (
+            <div className="absolute left-0 mt-2 w-96 bg-white rounded-xl border border-slate-200 shadow-xl p-4 z-50 space-y-3 text-xs">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <span className="font-bold text-slate-900">
+                  Single-Bottleneck Lock-In Engine
+                </span>
+                <button
+                  onClick={() => setIsBottleneckPopoverOpen(false)}
+                  className="text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
 
-          {latestLog && (
-            <span className="text-slate-400 hidden xl:inline">
-              Diag→Paid:{" "}
-              <strong
-                className={
-                  rates.completedToPaidPct >= 25
-                    ? "text-emerald-400"
-                    : "text-amber-400"
-                }
-              >
-                {rates.completedToPaidPct}% (
-                {latestLog.funnel_metrics.paid_conversions}/
-                {latestLog.funnel_metrics.diag_completed})
-              </strong>{" "}
-              · VoC Cached:{" "}
-              <strong className="text-teal-300">
-                {weeklyRealityLogs.flatMap((l) => l.verbatim_parent_quotes).length}{" "}
-                Quotes
-              </strong>
-            </span>
+              <div className="space-y-1">
+                <div className="text-[11px] font-bold uppercase text-amber-800">
+                  Locked Objective:
+                </div>
+                <p className="text-slate-700 font-medium">
+                  {stageCfg.lockedObjective}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <div className="p-2.5 rounded-lg bg-emerald-50/70 border border-emerald-200 space-y-1">
+                  <div className="font-bold text-emerald-900 text-[11px]">
+                    ✓ Allowed Proposal Types
+                  </div>
+                  <ul className="text-[11px] text-emerald-800 space-y-0.5">
+                    {stageCfg.allowedProposalTypes.map((item, i) => (
+                      <li key={i}>• {item}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="p-2.5 rounded-lg bg-rose-50/70 border border-rose-200 space-y-1">
+                  <div className="font-bold text-rose-900 text-[11px]">
+                    ✕ Blocked Scope
+                  </div>
+                  <ul className="text-[11px] text-rose-800 space-y-0.5">
+                    {stageCfg.blockedScope.map((item, i) => (
+                      <li key={i}>• {item}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              {/* Stage Simulator Switcher */}
+              <div className="pt-2 border-t border-slate-100">
+                <div className="text-[11px] font-semibold text-slate-500 mb-1.5">
+                  Simulate Paid Student Milestone Stage:
+                </div>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setPaidStudentCount(14)}
+                    className={`py-1.5 px-2 rounded-lg font-bold text-[11px] border ${
+                      activeBottleneckStage === "STAGE_1_CONVERSION"
+                        ? "bg-indigo-600 text-white border-indigo-600"
+                        : "bg-slate-50 text-slate-700 border-slate-200"
+                    }`}
+                  >
+                    Stage 1 (14/100)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaidStudentCount(38)}
+                    className={`py-1.5 px-2 rounded-lg font-bold text-[11px] border ${
+                      activeBottleneckStage === "STAGE_2_REFERRAL_DIAG"
+                        ? "bg-indigo-600 text-white border-indigo-600"
+                        : "bg-slate-50 text-slate-700 border-slate-200"
+                    }`}
+                  >
+                    Stage 2 (38/100)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaidStudentCount(72)}
+                    className={`py-1.5 px-2 rounded-lg font-bold text-[11px] border ${
+                      activeBottleneckStage === "STAGE_3_SCALE_ADS"
+                        ? "bg-indigo-600 text-white border-indigo-600"
+                        : "bg-slate-50 text-slate-700 border-slate-200"
+                    }`}
+                  >
+                    Stage 3 (72/100)
+                  </button>
+                </div>
+              </div>
+
+              {/* Workspace Module Switcher inside Popover */}
+              <div className="pt-2 border-t border-slate-100">
+                <div className="text-[11px] font-semibold text-slate-500 mb-1.5">
+                  Switch Command Module:
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {secondaryViews.map((sv) => (
+                    <button
+                      key={sv.id}
+                      type="button"
+                      onClick={() => {
+                        setActiveTab(sv.id);
+                        setIsBottleneckPopoverOpen(false);
+                      }}
+                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold border ${
+                        activeTab === sv.id
+                          ? "bg-slate-900 text-white border-slate-900"
+                          : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      {sv.icon}
+                      {sv.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
           )}
         </div>
 
-        {/* Right: Safeguard 2 — Single-Bottleneck Lock-In Engine (0-100 Students @ $139 CAD/mo) */}
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 bg-slate-900 px-3 py-1 rounded-lg border border-slate-800">
-            <Target className="w-3.5 h-3.5 text-teal-400" />
-            <span className="text-slate-400">Tier 2 ($139 CAD/mo):</span>
-            <strong className="text-white">
-              {paidStudentCount}/100 Students
+        {/* MODULE 3: Live Mini-Funnel Health Strip (Tabular Numerals + Lowest Rate Auto-Highlighted in Amber/Red) */}
+        <div className="hidden lg:flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-1.5 text-xs tabular-nums">
+          <div className="px-2 py-0.5 rounded-md text-slate-700">
+            <span className="text-slate-500">Contacts</span>{" "}
+            <strong className="font-bold text-slate-900">
+              {metrics.reach_or_contacts}
             </strong>
-            <span className="text-teal-400 font-mono">
-              (${(paidStudentCount * 139).toLocaleString()} MRR)
+          </div>
+
+          <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+
+          <div
+            className={`px-2 py-0.5 rounded-md font-medium ${
+              lowestStepKey === "booked"
+                ? "bg-amber-100 text-amber-950 border border-amber-300 font-bold"
+                : "text-slate-700"
+            }`}
+          >
+            <span>Diag Booked</span>{" "}
+            <strong>{rates.contactToBookedPct}%</strong>
+          </div>
+
+          <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+
+          <div
+            className={`px-2 py-0.5 rounded-md font-medium ${
+              lowestStepKey === "done"
+                ? "bg-amber-100 text-amber-950 border border-amber-300 font-bold"
+                : "text-slate-700"
+            }`}
+          >
+            <span>Diag Done</span>{" "}
+            <strong>{rates.bookedToCompletedPct}%</strong>
+          </div>
+
+          <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+
+          <div
+            className={`px-2.5 py-0.5 rounded-md ${
+              lowestStepKey === "paid" || rates.completedToPaidPct < 25
+                ? "bg-rose-100 text-rose-900 border border-rose-300 font-extrabold"
+                : "bg-emerald-50 text-emerald-800 font-bold"
+            }`}
+            title="Lowest conversion step in funnel — automatically highlighted"
+          >
+            <span>Paid</span> <strong>{rates.completedToPaidPct}%</strong>
+            {rates.completedToPaidPct < 25 && (
+              <span className="ml-1 text-[10px] uppercase tracking-wider">
+                (Bottleneck)
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* MODULE 4: Reality Gate Status Button (Right-aligned) + Compact View Switcher */}
+        <div className="flex items-center gap-2 shrink-0">
+          {isSampleSeedActive && (
+            <span
+              onClick={() => setRealityGateModalOpen(true)}
+              className="hidden xl:inline-flex items-center px-2 py-1 rounded-md bg-slate-100 text-slate-600 border border-slate-200 text-[11px] font-medium cursor-pointer hover:bg-slate-200"
+              title="Initial Ontario Grade 11/12 STEM sample data — clears on your first Weekly Reality Gate submission"
+            >
+              Sample Seed Data
             </span>
-          </div>
+          )}
 
-          {/* Quick Stage Switcher Pills to Test All 3 Bottleneck Lock Stages */}
-          <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg border border-slate-800">
+          {isLocked ? (
             <button
-              onClick={() => setPaidStudentCount(14)}
-              className={`px-2 py-1 rounded-md text-[11px] font-bold transition ${
-                activeBottleneckStage === "STAGE_1_CONVERSION"
-                  ? "bg-teal-600 text-white"
-                  : "text-slate-400 hover:text-white"
-              }`}
-              title="Stage 1 (0–25 Paid Students): Locked to Diag->Paid >= 25%"
+              type="button"
+              onClick={() => setRealityGateModalOpen(true)}
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs shadow-sm animate-pulse transition"
             >
-              S1: 0–25 (Conv Lock)
+              <AlertTriangle className="w-4 h-4" />
+              ⚠️ Log Weekly Reality (60s) to Unlock Proposals
             </button>
+          ) : (
             <button
-              onClick={() => setPaidStudentCount(38)}
-              className={`px-2 py-1 rounded-md text-[11px] font-bold transition ${
-                activeBottleneckStage === "STAGE_2_REFERRAL_DIAG"
-                  ? "bg-teal-600 text-white"
-                  : "text-slate-400 hover:text-white"
-              }`}
-              title="Stage 2 (26–60 Paid Students): Locked to Referrals & Seminars >= 40%"
+              type="button"
+              onClick={() => setRealityGateModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-xs transition"
             >
-              S2: 26–60 (Referral Lock)
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              ✓ Reality Gate Current (5d left)
             </button>
-            <button
-              onClick={() => setPaidStudentCount(72)}
-              className={`px-2 py-1 rounded-md text-[11px] font-bold transition ${
-                activeBottleneckStage === "STAGE_3_SCALE_ADS"
-                  ? "bg-teal-600 text-white"
-                  : "text-slate-400 hover:text-white"
-              }`}
-              title="Stage 3 (61–100 Paid Students): GTA Paid Ads (Blended CAC < $150 CAD)"
-            >
-              S3: 61–100 (GTA Ads)
-            </button>
-          </div>
-        </div>
-      </div>
+          )}
 
-      {/* Sub-Banner showing the Active Bottleneck Stage Allowed vs. Blocked Scope */}
-      <div className="bg-slate-900/95 text-slate-200 border-b border-slate-800 px-6 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px]">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-bold text-teal-400 uppercase tracking-wider">
-            🔒 Active Bottleneck Lock ({activeBottleneckStage}):
-          </span>
-          <span className="font-semibold text-white">
-            {stageCfg.lockedObjective}
-          </span>
+          <button
+            type="button"
+            onClick={toggleRealityGateLockSimulation}
+            title={
+              isLocked
+                ? "Click to unlock Reality Gate"
+                : "Click to simulate LOCKED Reality Gate state"
+            }
+            className="p-2 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition"
+          >
+            {isLocked ? (
+              <Lock className="w-4 h-4 text-amber-600" />
+            ) : (
+              <Unlock className="w-4 h-4" />
+            )}
+          </button>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="text-emerald-300">
-            <strong>Allowed:</strong>{" "}
-            {stageCfg.allowedProposalTypes.slice(0, 3).join(" · ")}
-          </span>
-          <span className="text-red-300">
-            <strong>Blocked Scope:</strong> {stageCfg.blockedScope.join(" · ")}
-          </span>
+      </header>
+
+      {/* Diagnostic Summary Toast Banner */}
+      {diagnosticToast && (
+        <div className="bg-slate-900 text-white px-6 py-2.5 border-b border-slate-800 flex items-center justify-between gap-4 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+            <span className="font-medium">{diagnosticToast}</span>
+          </div>
+          <button
+            onClick={clearDiagnosticToast}
+            className="text-slate-400 hover:text-white"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
-      </div>
+      )}
 
       {/* =====================================================================
-          60-SECOND WEEKLY REALITY GATE MODAL (Safeguard 1)
+          SPECIAL INTERACTIVE FLOW 1: WEEKLY REALITY GATE MODAL (60-Sec Check)
           ===================================================================== */}
       {isRealityGateModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-2xl max-w-2xl w-full border border-slate-200 shadow-2xl overflow-hidden my-8">
             <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <ShieldAlert className="w-5 h-5 text-teal-400" />
-                <div>
-                  <h2 className="font-bold text-base">
-                    Safeguard 1: Weekly Reality Gate (60-Second Ground-Truth Check)
-                  </h2>
-                  <p className="text-xs text-slate-400">
-                    New proposal generation is data-locked until this week&apos;s
-                    funnel numbers &amp; 2 verbatim parent quotes are logged.
-                  </p>
+              <div>
+                <div className="text-[11px] font-bold uppercase tracking-wider text-amber-400">
+                  Safeguard 1 · 60-Second Market Reality Check
                 </div>
+                <h2 className="font-bold text-base mt-0.5">
+                  Log Weekly Funnel Reality &amp; Verbatim Ontario Parent Quotes
+                </h2>
               </div>
               <button
                 onClick={() => setRealityGateModalOpen(false)}
@@ -311,90 +530,119 @@ export function SafeguardTopBar() {
 
             <form onSubmit={handleSubmitRealityCheck} className="p-6 space-y-5">
               {formError && (
-                <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs font-semibold flex items-center gap-2">
-                  <AlertOctagon className="w-4 h-4 text-red-600 shrink-0" />
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold">
                   {formError}
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
-                <div className="sm:col-span-1">
-                  <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">
-                    Week Start
+              {/* Step 1: 4 Numeric Funnel Inputs + Automatic Live Conversion % */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                    1. Weekly Funnel Numbers (`{weekStart}`)
                   </label>
                   <input
                     type="date"
                     value={weekStart}
                     onChange={(e) => setWeekStart(e.target.value)}
-                    required
-                    className="w-full px-2.5 py-2 rounded-lg border border-slate-300 text-xs font-semibold"
+                    className="px-2 py-1 rounded border border-slate-300 text-xs font-semibold tabular-nums"
                   />
                 </div>
-                <div>
-                  <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">
-                    1. Reach / Contacts
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={reach}
-                    onChange={(e) => setReach(Number(e.target.value))}
-                    required
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">
-                    2. Diag Booked
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={booked}
-                    onChange={(e) => setBooked(Number(e.target.value))}
-                    required
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">
-                    3. Diag Completed
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={completed}
-                    onChange={(e) => setCompleted(Number(e.target.value))}
-                    required
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold uppercase text-teal-700 mb-1">
-                    4. Paid ($139/mo)
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={paid}
-                    onChange={(e) => setPaid(Number(e.target.value))}
-                    required
-                    className="w-full px-3 py-2 rounded-lg border-2 border-teal-500 text-sm font-extrabold text-teal-900"
-                  />
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 tabular-nums">
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <label className="block text-[11px] font-semibold text-slate-500">
+                      Contacts / Reach
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={reach}
+                      onChange={(e) => setReach(Number(e.target.value))}
+                      className="w-full mt-1 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-base font-extrabold text-slate-900"
+                    />
+                    <div className="text-[11px] text-slate-400 mt-1">
+                      Top of funnel
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <label className="block text-[11px] font-semibold text-slate-500">
+                      Diag Booked
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={booked}
+                      onChange={(e) => setBooked(Number(e.target.value))}
+                      className="w-full mt-1 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-base font-extrabold text-slate-900"
+                    />
+                    <div className="text-[11px] font-semibold text-slate-600 mt-1">
+                      {modalLiveRates.contactToBookedPct}% Booked Rate
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <label className="block text-[11px] font-semibold text-slate-500">
+                      Diag Completed
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={completed}
+                      onChange={(e) => setCompleted(Number(e.target.value))}
+                      className="w-full mt-1 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-base font-extrabold text-slate-900"
+                    />
+                    <div className="text-[11px] font-semibold text-slate-600 mt-1">
+                      {modalLiveRates.bookedToCompletedPct}% Show-Up Rate
+                    </div>
+                  </div>
+
+                  <div
+                    className={`p-3 rounded-xl border ${
+                      modalLiveRates.completedToPaidPct < 25
+                        ? "bg-amber-50/70 border-amber-300"
+                        : "bg-emerald-50/70 border-emerald-300"
+                    }`}
+                  >
+                    <label className="block text-[11px] font-bold text-slate-700">
+                      Paid ($139/mo)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={paid}
+                      onChange={(e) => setPaid(Number(e.target.value))}
+                      className="w-full mt-1 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-base font-extrabold text-slate-900"
+                    />
+                    <div
+                      className={`text-[11px] font-bold mt-1 ${
+                        modalLiveRates.completedToPaidPct < 25
+                          ? "text-amber-900"
+                          : "text-emerald-800"
+                      }`}
+                    >
+                      {modalLiveRates.completedToPaidPct}% Diag→Paid (Target ≥25%)
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              {/* Verbatim Parent Quotes (Min 2) */}
-              <div className="space-y-2.5">
+              {/* Step 2: 2+ Verbatim Parent Quotes + Tag Chips */}
+              <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                    <Quote className="w-4 h-4 text-teal-600" />
-                    Verbatim Parent Objections / Questions Heard This Week (Min 2)
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                    2. Exact Verbatim Parent Objections Heard This Week (Min 2)
                   </label>
                   <button
                     type="button"
-                    onClick={handleAddQuoteField}
-                    className="inline-flex items-center gap-1 text-xs font-bold text-teal-700 hover:text-teal-800"
+                    onClick={() =>
+                      setQuotes([
+                        ...quotes,
+                        { quote_text: "", context_tag: "trust" },
+                      ])
+                    }
+                    className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-700"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     Add Quote
@@ -402,61 +650,87 @@ export function SafeguardTopBar() {
                 </div>
 
                 {quotes.map((q, idx) => (
-                  <div key={idx} className="flex gap-2 items-start">
-                    <select
-                      value={q.context_tag}
-                      onChange={(e) =>
-                        handleQuoteChange(idx, "context_tag", e.target.value)
-                      }
-                      className="px-2.5 py-2 rounded-lg border border-slate-300 bg-slate-50 text-xs font-bold text-slate-800 shrink-0"
-                    >
-                      {CONTEXT_TAGS.map((tag) => (
-                        <option key={tag} value={tag}>
-                          tag: {tag}
-                        </option>
-                      ))}
-                    </select>
+                  <div
+                    key={idx}
+                    className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2"
+                  >
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-[11px] font-bold text-slate-500">
+                        Parent Verbatim Quote #{idx + 1}
+                      </span>
+                      <div className="flex flex-wrap gap-1">
+                        {CONTEXT_TAGS.map((tag) => (
+                          <button
+                            key={tag.id}
+                            type="button"
+                            onClick={() =>
+                              setQuotes(
+                                quotes.map((item, i) =>
+                                  i === idx
+                                    ? { ...item, context_tag: tag.id }
+                                    : item
+                                )
+                              )
+                            }
+                            className={`px-2 py-0.5 rounded-md text-[11px] font-semibold transition ${
+                              q.context_tag === tag.id
+                                ? "bg-indigo-600 text-white"
+                                : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
+                            }`}
+                          >
+                            {tag.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                     <input
                       type="text"
                       value={q.quote_text}
                       onChange={(e) =>
-                        handleQuoteChange(idx, "quote_text", e.target.value)
+                        setQuotes(
+                          quotes.map((item, i) =>
+                            i === idx
+                              ? { ...item, quote_text: e.target.value }
+                              : item
+                          )
+                        )
                       }
-                      placeholder={`Exact unedited parent quote #${idx + 1}...`}
+                      placeholder="Paste exact unedited parent quote or objection..."
                       required={idx < 2}
-                      className="flex-1 px-3 py-2 rounded-lg border border-slate-300 text-xs text-slate-900"
+                      className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs text-slate-900"
                     />
                   </div>
                 ))}
               </div>
 
-              {/* Top Winning Touchpoint */}
+              {/* Step 3: 1 Winning Touchpoint Field */}
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
-                  Top Winning Touchpoint / Channel This Week
+                  3. Top Winning Touchpoint This Week
                 </label>
                 <input
                   type="text"
                   value={touchpoint}
                   onChange={(e) => setTouchpoint(e.target.value)}
                   required
-                  placeholder="Single conversation or touchpoint that produced the highest positive parent response..."
-                  className="w-full px-3.5 py-2 rounded-lg border border-slate-300 text-xs text-slate-900"
+                  placeholder="Single channel or conversation that produced the highest positive parent response..."
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs text-slate-900"
                 />
               </div>
 
+              {/* Actions */}
               <div className="pt-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3">
                 {!pilotWeek0Used ? (
                   <button
                     type="button"
                     onClick={activatePilotWeek0Override}
-                    className="px-3.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 text-xs font-bold transition"
+                    className="px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 text-xs font-bold transition"
                   >
-                    ⚡ Use One-Time &ldquo;Pilot Week 0 Bootstrap&rdquo; Override
+                    ⚡ Pilot Week 0 Bootstrap Override (1-Time)
                   </button>
                 ) : (
                   <span className="text-[11px] text-slate-400">
-                    Pilot Week 0 Bootstrap override already used.
+                    Pilot Week 0 Override used
                   </span>
                 )}
 
@@ -466,14 +740,14 @@ export function SafeguardTopBar() {
                     onClick={() => setRealityGateModalOpen(false)}
                     className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 text-xs font-bold"
                   >
-                    Close
+                    Cancel (Esc)
                   </button>
                   <button
                     type="submit"
-                    className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-md transition"
+                    className="inline-flex items-center gap-1.5 px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-sm transition"
                   >
                     <CheckCircle2 className="w-4 h-4" />
-                    Save Weekly Reality Log &amp; Unlock Generation
+                    Submit Reality Log &amp; Calibrate Proposals
                   </button>
                 </div>
               </div>
