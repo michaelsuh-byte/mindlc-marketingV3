@@ -422,6 +422,11 @@ ${top8Quotes
       `- [${q.id} · tier:${q.tier_id} · tag:${q.context_tag}]: "${q.quote_text}"`
   )
   .join("\n")}
+
+[MANDATORY WRITING STYLE FOR asset_body — STOP AI-OUTLINE OVERFORMATTING]
+• Write like a calm, credible Ontario STEM educator and human leader—NEVER like a robotic AI outline.
+• Do NOT emit bracketed meta-headers (e.g., "## [Tier 1 · Stage 1]"), robotic label prefixes, or heavy markdown symbol clutter.
+• Use natural conversational paragraphs, warm educator cadence, and clean bullet points only where a parent or Learning Manager genuinely benefits from a scannable list.
 [/GEMINI TIER-ISOLATED CONTEXT CACHE]
 
 [ACTIVE MARKETING SKILL: ${skill.skill_name} (Detail Level ${detailLevel})]
@@ -515,7 +520,7 @@ export async function generateMarketingResponse(
       lowerCmd.includes("teacher")
     ) {
       changeSummaryPill = `Updated v${nextVersionNumber} (${tierWorkspace.tier_short_name}): Softened tone to calm Ontario STEM educator guidance & removed promotional pressure`;
-      revisedBody = `${existingProposalToRevise.asset_body}\n\n---\n### 🌿 [v${nextVersionNumber} Refinement — ${tierWorkspace.tier_name} Calm Ontario Educator Tone]\n• **Tier-Accurate Value Framing (${tierWorkspace.price_label}):** ${tierWorkspace.offer_summary}\n• **Zero Cross-Tier Bleed:** Strictly respects ${tierWorkspace.tone_guardrail}\n• **Single Low-Friction Next Step:** ${revisedSingleCta}`;
+      revisedBody = `${existingProposalToRevise.asset_body}\n\n### Calm Ontario Educator Framing\nWe keep our commitment simple and transparent (${tierWorkspace.price_label}): ${tierWorkspace.offer_summary}\n\nNext Step: ${revisedSingleCta}`;
     } else if (
       lowerCmd.includes("k/t/c/a") ||
       lowerCmd.includes("ktca") ||
@@ -524,7 +529,7 @@ export async function generateMarketingResponse(
       lowerCmd.includes("sbi3u")
     ) {
       changeSummaryPill = `Updated v${nextVersionNumber} (${tierWorkspace.tier_short_name}): Sharpened Ontario Growing Success (K/T/C/A) rubric alignment for MHF4U, MCR3U & SBI3U`;
-      revisedBody = `${existingProposalToRevise.asset_body}\n\n---\n### 📐 [v${nextVersionNumber} Refinement — Ontario Growing Success (K/T/C/A) Alignment for ${tierWorkspace.tier_short_name}]\n• **Knowledge (K) vs. Thinking & Application (T/A):** Addresses ${citedQuotesList[0]} by requiring step-by-step Socratic decomposition on multi-step Ontario rubric problems.\n• **${tierWorkspace.tier_short_name} Delivery Mechanism:** ${tierWorkspace.offer_summary}`;
+      revisedBody = `${existingProposalToRevise.asset_body}\n\n### Ontario Growing Success (K/T/C/A) Rubric Alignment\nAs Ontario families often share with us: ${citedQuotesList[0]}.\n\n• We separate routine formula recall (Knowledge) from multi-step closed-book problem decomposition (Thinking & Application).\n• ${tierWorkspace.offer_summary}`;
     } else if (
       lowerCmd.includes("challenge") ||
       lowerCmd.includes("assumption") ||
@@ -535,10 +540,10 @@ export async function generateMarketingResponse(
         primary_failure_hypothesis: `Critical ${tierWorkspace.tier_short_name} Risk: Even if the parent agrees with the diagnostic gap, conversion will stall below ${stageGoal.primary_kpi_target_pct}% if the friction between '${tierWorkspace.funnel_labels[2]}' and '${tierWorkspace.funnel_labels[3]}' takes more than 90 seconds.`,
         blind_spot_question: `Does this ${tierWorkspace.tier_short_name} asset answer ${citedQuotesList[0].split(" ")[0]} before asking for the ${tierWorkspace.price_label} commitment?`,
       };
-      revisedBody = `${existingProposalToRevise.asset_body}\n\n---\n### 🛡️ [v${nextVersionNumber} Devil's Advocate Counter-Measure (${tierWorkspace.tier_short_name} · ${stageId})]\n• **Pre-Emptive Friction Removal:** Resolves ${citedQuotesList[0]} directly above the fold before presenting the single CTA.`;
+      revisedBody = `${existingProposalToRevise.asset_body}\n\n### Pre-Emptive Parent Trust Bridge\nBefore you decide on anything, we address the exact concern parents raise most often: ${citedQuotesList[0]}.`;
     } else {
       changeSummaryPill = `Updated v${nextVersionNumber} (${tierWorkspace.tier_short_name}): "${userCommand.slice(0, 48)}"`;
-      revisedBody = `${existingProposalToRevise.asset_body}\n\n---\n### 🔄 [v${nextVersionNumber} CMO Refinement — ${tierWorkspace.tier_name}]\n**Directive:** "${userCommand}"\n• **Offer Alignment:** ${tierWorkspace.offer_summary}\n• **Single CTA:** ${revisedSingleCta}`;
+      revisedBody = `${existingProposalToRevise.asset_body}\n\n### Refined Educator Note\n${userCommand}\n\n• ${tierWorkspace.offer_summary}\n• Next Step: ${revisedSingleCta}`;
     }
 
     const revisedSchema: MandatoryProposalSchema = {
@@ -615,24 +620,14 @@ export async function generateMarketingResponse(
           : stageId === "STAGE_2"
           ? "Download the Free MCR3U/MHF4U Unit-Test Checklist & Share a 14-Day Self-Coach Pass With a Classmate or Sibling"
           : "Start Your Free 10-Minute Automated Socratic Voice + LaTeX HUD Diagnostic Now",
-      asset_body: `## [${tierWorkspace.tier_name} · ${stageGoal.stage_title}]
-**Product Architecture:** 100% Automated 24/7 Socratic Voice + Interactive LaTeX Math/STEM HUD for Ontario Grades 9–12 (Zero human scheduling required · Instant midnight homework relief).
+      asset_body: `### Instant Post-Diagnostic Result Summary
+When your teen finishes their 10-minute diagnostic in MPM2D, MCR3U, MHF4U, or SBI3U, they immediately see their live LaTeX step trace on screen—no credit card wall required.
 
----
+> "You solved 3 of 5 procedural steps accurately, but paused on the multi-step Thinking & Application chain. As Ontario parents tell us: ${citedQuotesList[0]}."
 
-### 1. Instant Post-Diagnostic Self-Serve Checkout Bridge
-When the student finishes their automated 10-minute diagnostic in **MPM2D, MCR3U, MHF4U, or SBI3U**, display their live LaTeX HUD step trace immediately:
-> *"You solved 3 of 5 procedural steps accurately, but paused on the multi-step Thinking & Application chain. As Ontario parents tell us: ${citedQuotesList[0]}."*
-
-### 2. Why Self-Serve Socratic Voice + LaTeX HUD Beats Generic ChatGPT
-- **Spoken Socratic Guidance + Visual LaTeX Step Board:** Instead of dumping a wall of text answer that causes test-day blanking, our voice tutor asks one guiding question at a time while plotting the live equation on the LaTeX HUD.
-- **Day-7 Streak Engine:** Built-in 15-minute evening unit-test micro-missions keep students returning >= 4 nights/week automatically.
-
-👉 **Single Self-Serve CTA:** ${
-        stageId === "STAGE_1"
-          ? "Unlock Instant 24/7 Socratic Voice + LaTeX HUD Access ($39 CAD/mo Self-Serve — Cancel Anytime in 1 Click)"
-          : "Start Your Free 10-Minute Automated Socratic Voice + LaTeX HUD Diagnostic Now"
-      }`,
+### Why Self-Serve Socratic Voice + LaTeX HUD Beats Generic ChatGPT
+• Spoken Socratic Guidance + Visual LaTeX Step Board: Instead of dumping an instant answer key that causes closed-book test blanking, our voice coach asks one guiding question at a time while plotting the live equation on the LaTeX HUD.
+• Built-In Evening Study Habit: Short 15-minute unit-test warmup missions help Ontario Grade 9–12 students practice independently four nights a week (${tierWorkspace.price_label}, 100% self-serve).`,
       devils_advocate: {
         primary_failure_hypothesis:
           "Self-serve teenagers and parents abandon checkout if they have to create an account before seeing their personalized LaTeX HUD diagnostic result, or if Day-3 usage drops because there is no automated SMS unit-test reminder.",
@@ -674,18 +669,13 @@ When the student finishes their automated 10-minute diagnostic in **MPM2D, MCR3U
           : stageId === "STAGE_2"
           ? "Forward Your 2 VIP 'Growing Success K/T/C/A Diagnostic Guest Passes' to 2 GTA Parent Friends"
           : "Book Your Teen's Free 20-Minute Ontario K/T/C/A Diagnostic & Learning Manager Debrief",
-      asset_body: `## [${tierWorkspace.tier_name} · ${stageGoal.stage_title}]
-**Offer Architecture:** 24/7 AI Socratic Coaching + Ontario Growing Success (K/T/C/A) Parent Reports + Dedicated Human Learning Manager Accountability & Monthly 15-Min Parent Briefings ($139 CAD/month).
+      asset_body: `### First 90 Seconds: Growing Success (K/T/C/A) Diagnostic Walkthrough
+> "When we looked at {{student_first_name}}'s diagnostic across Ontario's Growing Success Achievement Chart (Knowledge, Thinking, Communication, Application), we saw the exact pattern you mentioned: ${citedQuotesList[0]}. Formula recall (Knowledge) is 82%, while unassisted multi-step Thinking & Application is 44%."
 
----
-
-### 1. Growing Success (K/T/C/A) Diagnostic Debrief Hook
-> *"When we audited {{student_first_name}}'s diagnostic across Ontario's Growing Success Achievement Chart (Knowledge, Thinking, Communication, Application), we saw the exact frustration you shared: ${citedQuotesList[0]}. Formula recall (Knowledge) is 82%, but unassisted multi-step Thinking & Application is 44%."*
-
-### 2. Why Tier 2 Managed Hybrid ($139 CAD/mo) Solves What Self-Study & $380/mo Centres Miss
-1. **24/7 AI Socratic Coach:** Available every night at 9:45 PM—guides your teen with step-by-step hints without ever handing over the final answer.
-2. **Dedicated Human Learning Manager + Monthly 15-Min Parent Briefings:** Eliminates kitchen-table nagging by auditing weekly Socratic logs and sending you a Growing Success K/T/C/A progress report.
-3. **30-Day Active-Habit Guarantee:** 3+ Socratic sessions/week established in Month 1 or 100% tuition refund.`,
+### Why Tier 2 Managed Hybrid ($139 CAD/mo) Solves What Self-Study & $380/mo Centres Miss
+• 24/7 AI Socratic Coach: Available every evening at 9:45 PM to guide your teen with step-by-step hints without ever handing over the final answer.
+• Dedicated Human Learning Manager + Monthly 15-Min Parent Briefings: Removes kitchen-table nagging by reviewing weekly Socratic logs and texting you a concise Growing Success K/T/C/A progress scorecard every Friday.
+• 30-Day Active-Habit Guarantee: 3+ Socratic sessions per week established in Month 1, or a full 100% tuition refund.`,
       devils_advocate: {
         primary_failure_hypothesis:
           "Ontario parents delay enrollment ('Let me ask my spouse') if the 10-minute debrief sounds like a feature overview instead of screen-sharing their child's exact K/T/C/A Thinking stall within the first 90 seconds.",
@@ -727,21 +717,16 @@ When the student finishes their automated 10-minute diagnostic in **MPM2D, MCR3U
           : stageId === "STAGE_2"
           ? "Request a Private VIP Introduction to Our Lead STEM Educator for a Trusted Grade 11/12 Family"
           : "Apply for Priority Placement on the Grade 12 MHF4U / MCV4U / SBI4U Prime 1:1 Educator Waitlist",
-      asset_body: `## [${tierWorkspace.tier_name} · ${stageGoal.stage_title}]
-**Executive Offer Architecture:** 1–2x/Week Live Online 1:1 Tutoring Sessions with a Senior Ontario STEM Educator + 24/7 AI Socratic Practice Between Sessions + Executive Parent Reporting & Custom OUAC/Waterloo CEMC Study Plan.
+      asset_body: `### Flag A Overload Consultation Opening
+When a Grade 11/12 student in MHF4U (Advanced Functions), MCV4U (Calculus & Vectors), SCH4U, or SBI4U stalls on 3+ consecutive Level 4 Thinking & Application problems within 21 days of a major exam or OUAC transmission window, our team schedules a private 1:1 syllabus review.
 
----
+### Consultative Closing Script for University-Prep Families
+> "In reviewing {{student_first_name}}'s MHF4U and MCV4U cognitive trace this week, we flagged what you noted earlier: ${citedQuotesList[0]}. When targeting 88%–93%+ top-6 averages for Engineering, Computer Science, or Business programs, Socratic AI practice works best alongside live surgical instruction."
 
-### 1. Tier 2 → Tier 3 Prime Upgrade Trigger ("Flag A Overload" Protocol)
-**Trigger Condition:** Fires when a Grade 11/12 student in **MHF4U (Advanced Functions), MCV4U (Calculus & Vectors), SCH4U, or SBI4U** hits a **Flag A Cognitive Overload** (stalling on 3+ consecutive Level 4 Thinking/Application problems with an upcoming unit exam or OUAC university prerequisite cutoff within 21 days).
-
-### 2. Consultative Closing Script for High-Anxiety University-Prep Families
-> *"In reviewing {{student_first_name}}'s MHF4U/MCV4U cognitive trace this week, we flagged what you noted earlier: ${citedQuotesList[0]}. Because Engineering, Computer Science, and Rotman/Ivey Business programs require an 88%–93%+ top-6 average, AI practice alone isn't enough when foundational multi-step proof techniques need live surgical correction.*
->
-> *Our **Prime 1:1 Online Tutor Hybrid** pairs:*
-> 1. **1–2 Weekly Live Online 1:1 Sessions with a Senior Ontario STEM Educator:** Deep surgical instruction on their exact teacher's unit test rubric and Waterloo CEMC-level extension problems.
-> 2. **24/7 Guided Socratic AI Between Live Sessions:** So your teen never forgets what the tutor taught between Sunday and Wednesday night.
-> 3. **Executive Parent Reporting & Learning Manager Oversight:** Weekly OUAC prerequisite grade tracking."*`,
+### How the Prime 1:1 Online Tutor Hybrid Works
+• 1–2 Weekly Live Online 1:1 Sessions with a Senior Ontario STEM Educator: Tailored directly to their school teacher's unit test rubric and Waterloo CEMC extension problems.
+• 24/7 Guided Socratic AI Between Live Sessions: Reinforces what the educator taught so your teen never gets stuck on Tuesday or Thursday night homework.
+• Executive Parent Reporting & Learning Manager Oversight: Direct weekly OUAC prerequisite grade tracking.`,
       devils_advocate: {
         primary_failure_hypothesis:
           "Affluent Grade 11/12 university-prep parents will reject Tier 3 Prime if it is pitched with mass-market discount urgency rather than scarce educator capacity and clinical OUAC prerequisite protection.",

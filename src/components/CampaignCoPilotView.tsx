@@ -8,6 +8,11 @@ import {
   TierId,
 } from "@/types/database";
 import {
+  ChannelAwareDraftRenderer,
+  convertDraftToCleanHtml,
+  stripMarkdownToCleanText,
+} from "@/components/ChannelAwareDraftRenderer";
+import {
   Copy,
   Check,
   Sparkles,
@@ -22,6 +27,7 @@ import {
   Save,
   RotateCcw,
   Lock,
+  FileCode2,
 } from "lucide-react";
 
 type FocusSubView = "draft" | "risks" | "voc_diff";
@@ -73,9 +79,12 @@ export function CampaignCoPilotView() {
     assets.find((a) => a.id === selectedProposalId) || assets[0];
 
   const [activeSubView, setActiveSubView] = useState<FocusSubView>("draft");
-  const [copiedDraft, setCopiedDraft] = useState(false);
+  const [copyToastMessage, setCopyToastMessage] = useState<string | null>(null);
+  const [copiedMode, setCopiedMode] = useState<"clean" | "formatted" | null>(
+    null
+  );
 
-  // Direct inline copy edit mode inside Draft view
+  // Direct inline copy edit mode inside Draft view (human-clean text without raw markdown)
   const [isEditingCopy, setIsEditingCopy] = useState(false);
   const [editableText, setEditableText] = useState("");
   const [editableTitle, setEditableTitle] = useState("");
@@ -103,7 +112,7 @@ export function CampaignCoPilotView() {
 
   useEffect(() => {
     if (selectedProposal) {
-      setEditableText(selectedProposal.content);
+      setEditableText(stripMarkdownToCleanText(selectedProposal.content));
       setEditableTitle(selectedProposal.title || "Untitled Proposal");
     }
   }, [selectedProposal]);
@@ -153,10 +162,52 @@ export function CampaignCoPilotView() {
       ? versionHistory[versionHistory.length - 2]
       : null;
 
-  const handleCopyDraft = () => {
-    navigator.clipboard.writeText(selectedProposal.content);
-    setCopiedDraft(true);
-    setTimeout(() => setCopiedDraft(false), 1800);
+  // 1. Copy Clean Text (Primary — for Facebook groups, Instagram, WhatsApp, SMS)
+  const handleCopyCleanText = async () => {
+    const cleanText = stripMarkdownToCleanText(selectedProposal.content);
+    const ctaSuffix = schema?.single_cta
+      ? `\n\n${stripMarkdownToCleanText(schema.single_cta)}`
+      : "";
+    await navigator.clipboard.writeText(`${cleanText}${ctaSuffix}`.trim());
+    setCopiedMode("clean");
+    setCopyToastMessage("Copied clean text!");
+    setTimeout(() => {
+      setCopiedMode(null);
+      setCopyToastMessage(null);
+    }, 2000);
+  };
+
+  // 2. Copy Formatted (Secondary — for Gmail, Google Docs, Notion)
+  const handleCopyFormatted = async () => {
+    const cleanText = stripMarkdownToCleanText(selectedProposal.content);
+    const htmlString = convertDraftToCleanHtml(
+      selectedProposal.content,
+      schema?.single_cta
+    );
+
+    try {
+      if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+        const htmlBlob = new Blob([htmlString], { type: "text/html" });
+        const textBlob = new Blob([cleanText], { type: "text/plain" });
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            "text/html": htmlBlob,
+            "text/plain": textBlob,
+          }),
+        ]);
+      } else {
+        await navigator.clipboard.writeText(cleanText);
+      }
+    } catch {
+      await navigator.clipboard.writeText(cleanText);
+    }
+
+    setCopiedMode("formatted");
+    setCopyToastMessage("Copied formatted copy for Gmail / Docs!");
+    setTimeout(() => {
+      setCopiedMode(null);
+      setCopyToastMessage(null);
+    }, 2000);
   };
 
   const handleSaveInlineEdit = () => {
@@ -199,11 +250,24 @@ export function CampaignCoPilotView() {
     setShowApprovePopover(false);
   };
 
+  const effectiveChannel =
+    schema?.channel ||
+    selectedProposal.channel_badge ||
+    selectedProposal.platform;
+
   return (
     <div
       ref={scrollContainerRef}
       className="relative min-h-[calc(100vh-60px)] flex flex-col justify-between bg-slate-50/60"
     >
+      {/* Crisp Floating Copy Confirmation Toast */}
+      {copyToastMessage && (
+        <div className="fixed top-[72px] right-6 z-50 px-3.5 py-2 rounded-xl bg-slate-900 text-white text-xs font-medium shadow-lg flex items-center gap-2 animate-in fade-in">
+          <Check className="w-3.5 h-3.5 text-emerald-400" />
+          <span>{copyToastMessage}</span>
+        </div>
+      )}
+
       {/* Optional subtle toast if a stage/tier guardrail notification fired */}
       {diagnosticToast && (
         <div className="max-w-[820px] w-full mx-auto px-6 pt-4">
@@ -255,7 +319,7 @@ export function CampaignCoPilotView() {
 
               {/* Channel Tag */}
               <span className="px-2.5 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200">
-                {selectedProposal.channel_badge || selectedProposal.platform}
+                {effectiveChannel}
               </span>
 
               {/* Stage Pill */}
@@ -270,16 +334,22 @@ export function CampaignCoPilotView() {
             {schema?.single_cta && (
               <div
                 className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-[11px] text-slate-600 max-w-xs truncate"
-                title={`Single CTA: ${schema.single_cta}`}
+                title={`Single CTA: ${stripMarkdownToCleanText(
+                  schema.single_cta
+                )}`}
               >
                 <span className="font-semibold text-slate-800">CTA:</span>
-                <span className="truncate">{schema.single_cta}</span>
+                <span className="truncate">
+                  {stripMarkdownToCleanText(schema.single_cta)}
+                </span>
               </div>
             )}
           </div>
 
           <h1 className="text-xl font-semibold text-slate-900 tracking-tight leading-snug">
-            {selectedProposal.title || "Untitled Proposal"}
+            {stripMarkdownToCleanText(
+              selectedProposal.title || "Untitled Proposal"
+            )}
           </h1>
         </div>
 
@@ -357,39 +427,69 @@ export function CampaignCoPilotView() {
         {/* 3. SUB-VIEW CANVAS CONTENT (Strict Progressive Disclosure)        */}
         {/* ================================================================= */}
 
-        {/* SUB-VIEW A: 📄 DRAFT (Default — ONLY the clean formatted copy/script and a Copy button) */}
+        {/* SUB-VIEW A: 📄 DRAFT (Clean Typography + Channel-Aware Preview + Smart Copy Buttons) */}
         {activeSubView === "draft" && (
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-            {/* Document Toolbar */}
-            <div className="px-6 py-3 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+            {/* Document Toolbar with Smart Copy Buttons */}
+            <div className="px-6 py-3 border-b border-slate-100 bg-slate-50/60 flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs font-medium text-slate-500">
-                {activeTier.tier_name} · Execution Copy
+                {activeTier.tier_name} · {effectiveChannel}
               </span>
 
               <div className="flex items-center gap-2">
                 {!isEditingCopy ? (
                   <>
+                    {/* Subtle Edit Toggle (edits clean text without raw markdown) */}
                     <button
-                      onClick={() => setIsEditingCopy(true)}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+                      onClick={() => {
+                        setEditableText(
+                          stripMarkdownToCleanText(selectedProposal.content)
+                        );
+                        setIsEditingCopy(true);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+                      title="Directly edit wording in clean plain text"
                     >
                       <Edit3 className="w-3.5 h-3.5" />
-                      <span>Edit Text</span>
+                      <span>Edit</span>
                     </button>
 
+                    {/* Secondary Smart Copy: Copy Formatted (for Gmail, Google Docs, Notion) */}
                     <button
-                      onClick={handleCopyDraft}
-                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 shadow-2xs transition-colors"
+                      onClick={handleCopyFormatted}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 shadow-2xs transition-colors"
+                      title="Copy rich HTML formatting for Gmail, Google Docs, or Notion (zero raw ### or **)"
                     >
-                      {copiedDraft ? (
+                      {copiedMode === "formatted" ? (
                         <>
                           <Check className="w-3.5 h-3.5 text-emerald-600" />
-                          <span className="text-emerald-700">Copied</span>
+                          <span className="text-emerald-700 font-semibold">
+                            Copied Formatted
+                          </span>
                         </>
                       ) : (
                         <>
-                          <Copy className="w-3.5 h-3.5 text-slate-500" />
-                          <span>Copy</span>
+                          <FileCode2 className="w-3.5 h-3.5 text-slate-500" />
+                          <span>Copy Formatted</span>
+                        </>
+                      )}
+                    </button>
+
+                    {/* Primary Smart Copy: Copy Clean Text (for Facebook groups, WhatsApp, SMS) */}
+                    <button
+                      onClick={handleCopyCleanText}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white shadow-2xs transition-colors"
+                      title="Copy 100% clean plain text with • bullets and zero raw Markdown characters"
+                    >
+                      {copiedMode === "clean" ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Copied Clean Text!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Copy Clean Text</span>
                         </>
                       )}
                     </button>
@@ -399,19 +499,21 @@ export function CampaignCoPilotView() {
                     <button
                       onClick={() => {
                         setIsEditingCopy(false);
-                        setEditableText(selectedProposal.content);
+                        setEditableText(
+                          stripMarkdownToCleanText(selectedProposal.content)
+                        );
                         setEditableTitle(
                           selectedProposal.title || "Untitled Proposal"
                         );
                       }}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-100"
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-100"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
                       <span>Cancel</span>
                     </button>
                     <button
                       onClick={handleSaveInlineEdit}
-                      className="inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white"
+                      className="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white"
                     >
                       <Save className="w-3.5 h-3.5" />
                       <span>Save Revision</span>
@@ -421,7 +523,7 @@ export function CampaignCoPilotView() {
               </div>
             </div>
 
-            {/* Clean Document Body */}
+            {/* Clean Editorial Document Body (Zero Raw Markdown Symbols) */}
             <div className="p-7 sm:p-8">
               {isEditingCopy ? (
                 <div className="space-y-4">
@@ -438,20 +540,24 @@ export function CampaignCoPilotView() {
                   </div>
                   <div>
                     <label className="block text-[11px] font-semibold uppercase text-slate-400">
-                      Copy / Script Body
+                      Clean Human-Readable Copy (No Markdown Syntax Needed)
                     </label>
                     <textarea
-                      rows={16}
+                      rows={15}
                       value={editableText}
                       onChange={(e) => setEditableText(e.target.value)}
-                      className="mt-1 w-full rounded-xl border border-slate-300 p-4 text-[15px] leading-[1.65] text-slate-800 font-sans focus:outline-none focus:border-indigo-500"
+                      className="mt-1 w-full rounded-xl border border-slate-300 p-4 text-[15px] leading-[1.7] text-slate-800 font-sans focus:outline-none focus:border-indigo-500"
                     />
                   </div>
                 </div>
               ) : (
-                <article className="text-[15px] leading-[1.7] text-slate-800 whitespace-pre-wrap font-normal">
-                  {selectedProposal.content}
-                </article>
+                <ChannelAwareDraftRenderer
+                  content={selectedProposal.content}
+                  title={selectedProposal.title || "Untitled Proposal"}
+                  channel={effectiveChannel}
+                  tierName={activeTier.tier_name}
+                  singleCta={schema?.single_cta}
+                />
               )}
             </div>
           </div>
@@ -542,7 +648,7 @@ export function CampaignCoPilotView() {
           </div>
         )}
 
-        {/* SUB-VIEW C: 🗣️ VoC & DIFF (Cited Real Parent Quotes & v1/v2 Version Diff) */}
+        {/* SUB-VIEW C: 🗣️ VoC & DIFF (Cited Real Parent Quotes & Clean v1/v2 Version Diff) */}
         {activeSubView === "voc_diff" && (
           <div className="space-y-5">
             {/* Cited Real Parent Quotes */}
@@ -569,14 +675,14 @@ export function CampaignCoPilotView() {
                       key={idx}
                       className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 leading-relaxed"
                     >
-                      {quoteStr}
+                      {stripMarkdownToCleanText(quoteStr)}
                     </div>
                   ))}
                 </div>
               )}
             </div>
 
-            {/* Version History & v1 / v2 Diff */}
+            {/* Version History & Clean v1 / v2 Diff (Zero Raw Markdown) */}
             <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -598,9 +704,9 @@ export function CampaignCoPilotView() {
                         {previousVersion.change_summary}
                       </span>
                     </div>
-                    <pre className="text-xs text-slate-600 whitespace-pre-wrap font-sans leading-relaxed max-h-64 overflow-y-auto">
-                      {previousVersion.content}
-                    </pre>
+                    <div className="text-xs text-slate-600 whitespace-pre-wrap font-sans leading-relaxed max-h-64 overflow-y-auto">
+                      {stripMarkdownToCleanText(previousVersion.content)}
+                    </div>
                   </div>
 
                   <div className="rounded-xl border border-indigo-200 bg-indigo-50/20 p-4 space-y-2">
@@ -612,16 +718,16 @@ export function CampaignCoPilotView() {
                         {latestVersion.change_summary}
                       </span>
                     </div>
-                    <pre className="text-xs text-slate-800 whitespace-pre-wrap font-sans leading-relaxed max-h-64 overflow-y-auto">
-                      {latestVersion.content}
-                    </pre>
+                    <div className="text-xs text-slate-800 whitespace-pre-wrap font-sans leading-relaxed max-h-64 overflow-y-auto">
+                      {stripMarkdownToCleanText(latestVersion.content)}
+                    </div>
                   </div>
                 </div>
               ) : (
                 <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600">
                   Currently on initial snapshot (<strong>v1</strong>). Use{" "}
                   <strong>✨ Refine with AI</strong> or{" "}
-                  <strong>Edit Text</strong> to create{" "}
+                  <strong>Edit</strong> to create{" "}
                   <span className="font-mono">v2</span> and compare side-by-side
                   diffs.
                 </div>
@@ -926,10 +1032,14 @@ export function CampaignCoPilotView() {
                       : "bg-slate-100 text-slate-800 mr-4 border border-slate-200/80"
                   }`}
                 >
-                  <div className="whitespace-pre-wrap">{displayBody}</div>
+                  <div className="whitespace-pre-wrap">
+                    {stripMarkdownToCleanText(displayBody || "")}
+                  </div>
                   {msg.strategicJustification?.rationaleBody && (
-                    <div className="mt-1.5 pt-1.5 border-t border-slate-200/70 text-[11px] text-slate-500">
-                      {msg.strategicJustification.rationaleBody}
+                    <div className="mt-1.5 pt-1.5 border-t border-slate-200/70 text-[11px] text-slate-500 whitespace-pre-wrap">
+                      {stripMarkdownToCleanText(
+                        msg.strategicJustification.rationaleBody
+                      )}
                     </div>
                   )}
                 </div>
