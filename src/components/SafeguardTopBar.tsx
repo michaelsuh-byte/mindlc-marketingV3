@@ -1,45 +1,50 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { useMarketingStore, NavigationTab } from "@/store/useMarketingStore";
 import { computeFunnelRates } from "@/services/marketingAi";
 import {
   StageId,
   TierId,
-  VoCContextTag,
+  VerbatimParentQuote,
   VoCTierTag,
+  WeeklyFunnelMetrics,
 } from "@/types/database";
 import {
-  Lock,
-  Unlock,
-  ChevronDown,
-  ArrowRight,
-  Plus,
+  Target,
+  MessageSquareQuote,
+  X,
   CheckCircle2,
   AlertTriangle,
-  X,
-  GraduationCap,
-  Layers,
-  Bot,
-  Radar,
-  BookOpen,
-  Sliders,
   Edit3,
+  Plus,
+  Copy,
+  Check,
+  Sparkles,
+  ArrowRight,
+  Compass,
+  Lock,
+  Unlock,
 } from "lucide-react";
 
-const CONTEXT_TAGS: { id: VoCContextTag; label: string }[] = [
-  { id: "trust", label: "Trust" },
-  { id: "ai_cheating", label: "AI Cheating" },
-  { id: "price", label: "Price" },
-  { id: "curriculum", label: "Curriculum" },
-  { id: "student_motivation", label: "Student Motivation" },
+const TIER_TAB_ITEMS: {
+  id: TierId;
+  shortLabel: string;
+}[] = [
+  { id: "TIER_1", shortLabel: "Tier 1 · Online" },
+  { id: "TIER_2", shortLabel: "Tier 2 · Managed" },
+  { id: "TIER_3", shortLabel: "Tier 3 · Prime 1:1" },
 ];
 
-const TIER_PILLS: { id: TierId; short: string; price: string }[] = [
-  { id: "TIER_1", short: "T1 · Self-Coach", price: "$39/mo" },
-  { id: "TIER_2", short: "T2 · Managed Hybrid", price: "$139/mo" },
-  { id: "TIER_3", short: "T3 · Prime 1:1", price: "$349/mo" },
-];
+const STAGE_ORDER: StageId[] = ["STAGE_1", "STAGE_2", "STAGE_3"];
+
+const TAG_BADGE_STYLES: Record<VerbatimParentQuote["context_tag"], string> = {
+  ai_cheating: "bg-rose-50 text-rose-700 border-rose-200",
+  curriculum: "bg-indigo-50 text-indigo-700 border-indigo-200",
+  price: "bg-amber-50 text-amber-800 border-amber-200",
+  trust: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  student_motivation: "bg-purple-50 text-purple-700 border-purple-200",
+};
 
 export function SafeguardTopBar() {
   const {
@@ -48,799 +53,888 @@ export function SafeguardTopBar() {
     activeTierId,
     tierWorkspaces,
     setActiveTierId,
+    setPaidStudentCount,
     setActiveStageOverride,
     updateTierStageGoal,
+    vocVault,
     realityGateStatus,
-    pilotWeek0Used,
-    weeklyRealityLogs,
+    isStageFunnelModalOpen,
     isRealityGateModalOpen,
-    isSampleSeedActive,
-    diagnosticToast,
-    paidStudentCount,
-    activeBottleneckStage,
+    isVocVaultOpen,
+    setStageFunnelModalOpen,
     setRealityGateModalOpen,
-    toggleRealityGateLockSimulation,
+    setVocVaultOpen,
+    closeAllOverlays,
     submitWeeklyRealityLog,
     activatePilotWeek0Override,
-    setPaidStudentCount,
-    clearDiagnosticToast,
+    toggleRealityGateLockSimulation,
+    sendCopilotCommand,
   } = useMarketingStore();
 
-  const [isBottleneckPopoverOpen, setIsBottleneckPopoverOpen] = useState(false);
-  const [editingStageId, setEditingStageId] = useState<StageId | null>(null);
+  const activeTier = tierWorkspaces[activeTierId];
+  const [step1Label, step2Label, step3Label, step4Label] =
+    activeTier.funnel_labels;
 
-  const currentTierWs = tierWorkspaces[activeTierId];
-  const latestLog = weeklyRealityLogs[0];
-  const metrics = latestLog?.funnel_metrics || {
-    reach_or_contacts: 64,
-    diag_booked: 18,
-    diag_completed: 14,
-    paid_conversions: 2,
+  const latestLog = activeTier.weekly_reality_logs[0];
+  const funnelMetrics: WeeklyFunnelMetrics = latestLog?.funnel_metrics ?? {
+    reach_or_contacts: 0,
+    diag_booked: 0,
+    diag_completed: 0,
+    paid_conversions: 0,
   };
-  const rates = computeFunnelRates(metrics);
-  const stageGoal = currentTierWs.stage_goals[activeBottleneckStage];
-  const [lbl1, lbl2, lbl3, lbl4] = currentTierWs.funnel_labels;
+  const funnelRates = computeFunnelRates(funnelMetrics);
 
-  // Stage Goal Inline Editor State
-  const [editKpiName, setEditKpiName] = useState(stageGoal.primary_kpi_name);
-  const [editKpiTargetPct, setEditKpiTargetPct] = useState(
-    stageGoal.primary_kpi_target_pct
-  );
-  const [editTargetPaid, setEditTargetPaid] = useState(
-    stageGoal.target_paid_count
-  );
+  // Stage & Funnel Modal state
+  const [isEditingGoals, setIsEditingGoals] = useState(false);
 
-  // Identify lowest conversion step in the active tier's funnel
-  const stepRates = [
-    { key: "booked", pct: rates.contactToBookedPct },
-    { key: "done", pct: rates.bookedToCompletedPct },
-    { key: "paid", pct: rates.completedToPaidPct },
-  ];
-  const lowestStepKey = [...stepRates].sort((a, b) => a.pct - b.pct)[0]?.key;
-
-  // 60-Second Weekly Reality Gate Modal Form State (Syncs when activeTierId changes)
-  const [weekStart, setWeekStart] = useState(
-    new Date().toISOString().split("T")[0]
+  // Reality Gate Form state
+  const [weekStartDate, setWeekStartDate] = useState(
+    latestLog?.week_start_date || new Date().toISOString().slice(0, 10)
   );
-  const [reach, setReach] = useState(metrics.reach_or_contacts);
-  const [booked, setBooked] = useState(metrics.diag_booked);
-  const [completed, setCompleted] = useState(metrics.diag_completed);
-  const [paid, setPaid] = useState(metrics.paid_conversions);
-  const [touchpoint, setTouchpoint] = useState(
+  const [reachOrContacts, setReachOrContacts] = useState(
+    funnelMetrics.reach_or_contacts
+  );
+  const [diagBooked, setDiagBooked] = useState(funnelMetrics.diag_booked);
+  const [diagCompleted, setDiagCompleted] = useState(
+    funnelMetrics.diag_completed
+  );
+  const [paidConversions, setPaidConversions] = useState(
+    funnelMetrics.paid_conversions
+  );
+  const [topWinningTouchpoint, setTopWinningTouchpoint] = useState(
     latestLog?.top_winning_touchpoint || ""
   );
-  const [alsoUnlockOtherTiers, setAlsoUnlockOtherTiers] = useState(false);
+  const [alsoUnlockAllTiers, setAlsoUnlockAllTiers] = useState(true);
   const [quotes, setQuotes] = useState<
     {
       quote_text: string;
-      context_tag: VoCContextTag;
+      context_tag: VerbatimParentQuote["context_tag"];
       tier_id: VoCTierTag;
     }[]
   >([
     {
       quote_text:
-        "My son already uses ChatGPT to finish homework in 5 minutes and then gets 56% on his MHF4U Advanced Functions unit test.",
-      context_tag: "ai_cheating",
+        latestLog?.verbatim_parent_quotes[0]?.quote_text ||
+        "My child finishes homework with ChatGPT in 5 minutes and then blanks out on closed-book Ontario unit tests.",
+      context_tag:
+        latestLog?.verbatim_parent_quotes[0]?.context_tag || "ai_cheating",
       tier_id: activeTierId,
     },
     {
       quote_text:
-        "Her teacher marks Ontario Growing Success (K/T/C/A) Thinking and Application questions strictly—generic tutoring worksheets don't match Grade 11 SBI3U or MCR3U tests.",
-      context_tag: "curriculum",
-      tier_id: "ALL",
+        latestLog?.verbatim_parent_quotes[1]?.quote_text ||
+        "Her teacher marks Ontario K/T/C/A Thinking & Application rubrics strictly—generic tutoring sheets don't match.",
+      context_tag:
+        latestLog?.verbatim_parent_quotes[1]?.context_tag || "curriculum",
+      tier_id: activeTierId,
     },
   ]);
-  const [formError, setFormError] = useState<string | null>(null);
+  const [gateError, setGateError] = useState<string | null>(null);
 
+  // VoC Drawer filter state
+  const [vocFilterTier, setVocFilterTier] = useState<VoCTierTag | "SHOW_ALL">(
+    "SHOW_ALL"
+  );
+  const [vocFilterTag, setVocFilterTag] = useState<
+    VerbatimParentQuote["context_tag"] | "ALL_TAGS"
+  >("ALL_TAGS");
+  const [copiedQuoteId, setCopiedQuoteId] = useState<string | null>(null);
+  const [showUtilityMenu, setShowUtilityMenu] = useState(false);
+
+  // Sync Reality Gate form when switching tiers
   useEffect(() => {
-    const log = currentTierWs.weekly_reality_logs[0];
+    const log = tierWorkspaces[activeTierId].weekly_reality_logs[0];
     if (log) {
-      setReach(log.funnel_metrics.reach_or_contacts);
-      setBooked(log.funnel_metrics.diag_booked);
-      setCompleted(log.funnel_metrics.diag_completed);
-      setPaid(log.funnel_metrics.paid_conversions);
-      setTouchpoint(log.top_winning_touchpoint);
+      setWeekStartDate(log.week_start_date);
+      setReachOrContacts(log.funnel_metrics.reach_or_contacts);
+      setDiagBooked(log.funnel_metrics.diag_booked);
+      setDiagCompleted(log.funnel_metrics.diag_completed);
+      setPaidConversions(log.funnel_metrics.paid_conversions);
+      setTopWinningTouchpoint(log.top_winning_touchpoint);
+      if (log.verbatim_parent_quotes.length >= 2) {
+        setQuotes(
+          log.verbatim_parent_quotes.map((q) => ({
+            quote_text: q.quote_text,
+            context_tag: q.context_tag,
+            tier_id: q.tier_id || activeTierId,
+          }))
+        );
+      }
     }
-  }, [activeTierId, currentTierWs.weekly_reality_logs]);
+  }, [activeTierId, tierWorkspaces]);
 
-  const modalLiveRates = computeFunnelRates({
-    reach_or_contacts: Number(reach) || 0,
-    diag_booked: Number(booked) || 0,
-    diag_completed: Number(completed) || 0,
-    paid_conversions: Number(paid) || 0,
-  });
-
+  // Global ESC key closes any open modal or slide-over drawer
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setRealityGateModalOpen(false);
-        setIsBottleneckPopoverOpen(false);
+        closeAllOverlays();
+        setShowUtilityMenu(false);
       }
     };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [setRealityGateModalOpen]);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [closeAllOverlays]);
 
-  useEffect(() => {
-    if (!diagnosticToast) return;
-    const t = setTimeout(() => clearDiagnosticToast(), 7000);
-    return () => clearTimeout(t);
-  }, [diagnosticToast, clearDiagnosticToast]);
-
-  const handleSubmitRealityCheck = (e: React.FormEvent) => {
+  const handleRealityGateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const validQuotes = quotes.filter((q) => q.quote_text.trim().length >= 8);
+    const validQuotes = quotes.filter((q) => q.quote_text.trim().length >= 10);
     if (validQuotes.length < 2) {
-      setFormError(
-        "Please enter at least 2 exact, unedited verbatim parent quotes or objections heard this week."
+      setGateError(
+        "Please enter at least 2 verbatim parent quotes (min 10 characters each) heard this week."
       );
       return;
     }
-    if (!touchpoint.trim()) {
-      setFormError("Please specify this week's top winning touchpoint.");
+    if (!topWinningTouchpoint.trim()) {
+      setGateError(
+        "Please specify the top winning channel or conversation touchpoint from this week."
+      );
       return;
     }
-    setFormError(null);
+    setGateError(null);
     submitWeeklyRealityLog({
-      week_start_date: weekStart,
+      week_start_date: weekStartDate,
       funnel_metrics: {
-        reach_or_contacts: Number(reach),
-        diag_booked: Number(booked),
-        diag_completed: Number(completed),
-        paid_conversions: Number(paid),
+        reach_or_contacts: Number(reachOrContacts) || 0,
+        diag_booked: Number(diagBooked) || 0,
+        diag_completed: Number(diagCompleted) || 0,
+        paid_conversions: Number(paidConversions) || 0,
       },
       verbatim_parent_quotes: validQuotes,
-      top_winning_touchpoint: touchpoint,
-      alsoUnlockTiers: alsoUnlockOtherTiers
-        ? ["TIER_1", "TIER_2", "TIER_3"]
-        : [activeTierId],
+      top_winning_touchpoint: topWinningTouchpoint.trim(),
+      alsoUnlockTiers: alsoUnlockAllTiers
+        ? (["TIER_1", "TIER_2", "TIER_3"] as TierId[])
+        : [],
     });
   };
 
-  const handleOpenStageGoalEdit = (st: StageId) => {
-    const g = currentTierWs.stage_goals[st];
-    setEditingStageId(st);
-    setEditKpiName(g.primary_kpi_name);
-    setEditKpiTargetPct(g.primary_kpi_target_pct);
-    setEditTargetPaid(g.target_paid_count);
-  };
+  const activeStageNumber =
+    activeTier.active_stage === "STAGE_1"
+      ? "Stage 1"
+      : activeTier.active_stage === "STAGE_2"
+      ? "Stage 2"
+      : "Stage 3";
 
-  const handleSaveStageGoalEdit = (st: StageId) => {
-    updateTierStageGoal(activeTierId, st, {
-      primary_kpi_name: editKpiName,
-      primary_kpi_target_pct: Number(editKpiTargetPct),
-      target_paid_count: Number(editTargetPaid),
-      short_badge: `${st.replace("_", " ")}: ${editKpiName} ≥ ${editKpiTargetPct}%`,
-    });
-    setEditingStageId(null);
-  };
+  const filteredVocQuotes = vocVault.filter((q) => {
+    const tierMatch =
+      vocFilterTier === "SHOW_ALL"
+        ? true
+        : q.tier_id === vocFilterTier || q.tier_id === "ALL";
+    const tagMatch =
+      vocFilterTag === "ALL_TAGS" ? true : q.context_tag === vocFilterTag;
+    return tierMatch && tagMatch;
+  });
 
-  const isLocked = realityGateStatus === "LOCKED";
-
-  // 3-Segment Milestone Progress Bar dynamically scaled to the active tier's Stage 1/2/3 targets!
-  const s1Max = currentTierWs.stage_goals.STAGE_1.target_paid_count;
-  const s2Max = currentTierWs.stage_goals.STAGE_2.target_paid_count;
-  const s3Max = currentTierWs.stage_goals.STAGE_3.target_paid_count;
-
-  const seg1Pct = Math.min(100, Math.round((paidStudentCount / s1Max) * 100));
-  const seg2Pct =
-    paidStudentCount > s1Max
-      ? Math.min(
-          100,
-          Math.round(((paidStudentCount - s1Max) / (s2Max - s1Max)) * 100)
-        )
-      : 0;
-  const seg3Pct =
-    paidStudentCount > s2Max
-      ? Math.min(
-          100,
-          Math.round(((paidStudentCount - s2Max) / (s3Max - s2Max)) * 100)
-        )
-      : 0;
-
-  const secondaryViews: {
-    id: NavigationTab;
-    label: string;
-    icon: React.ReactNode;
-  }[] = [
+  // Compute weakest step among the 3 conversion rates for the 4-Step Mini-Funnel
+  const stepRates = [
     {
-      id: "copilot",
-      label: "CMO Cockpit",
-      icon: <Layers className="w-3.5 h-3.5" />,
+      index: 0,
+      label: `${step1Label} → ${step2Label}`,
+      rate: funnelRates.contactToBookedPct,
     },
     {
-      id: "planner",
-      label: "5-Horizon Planner",
-      icon: <Bot className="w-3.5 h-3.5" />,
+      index: 1,
+      label: `${step2Label} → ${step3Label}`,
+      rate: funnelRates.bookedToCompletedPct,
     },
     {
-      id: "intel",
-      label: "Market Intel",
-      icon: <Radar className="w-3.5 h-3.5" />,
-    },
-    {
-      id: "skills",
-      label: "Skills",
-      icon: <BookOpen className="w-3.5 h-3.5" />,
-    },
-    {
-      id: "settings",
-      label: "Persona & Schema",
-      icon: <Sliders className="w-3.5 h-3.5" />,
+      index: 2,
+      label: `${step3Label} → ${step4Label}`,
+      rate: funnelRates.completedToPaidPct,
     },
   ];
+  const weakestRateObj = [...stepRates].sort((a, b) => a.rate - b.rate)[0];
 
   return (
     <>
-      {/* =====================================================================
-          LEVEL 1: MACRO COMMAND STRIP (Sticky Top Bar — Height ~72px)
-          Now includes 3-Tier Workspace Switcher + Tier-Specific Funnel & Stage Lock
-          ===================================================================== */}
-      <header className="sticky top-0 z-30 h-[72px] bg-white border-b border-slate-200 px-4 flex items-center justify-between gap-3 select-none shadow-2xs">
-        {/* MODULE 1: Brand + 3-Tier Workspace Switcher + North Star Progress Pill */}
-        <div className="flex items-center gap-3 shrink-0">
-          <div
+      {/* ===================================================================== */}
+      {/* 1. ULTRA-MINIMAL TOP BAR (Height ~60px — Zero Metric Clutter)          */}
+      {/* ===================================================================== */}
+      <header className="sticky top-0 z-30 h-[60px] bg-white border-b border-slate-200 px-5 flex items-center justify-between select-none">
+        {/* LEFT SIDE: Brand Mark + 3 Product Tier Tabs (Segmented Control) */}
+        <div className="flex items-center gap-4">
+          <button
             onClick={() => setActiveTab("copilot")}
-            className="flex items-center gap-2 cursor-pointer"
+            className="flex items-center gap-2 text-left group focus:outline-none"
+            title="Return to Focused Proposal Canvas"
           >
-            <div className="w-9 h-9 rounded-lg bg-slate-900 text-white flex items-center justify-center">
-              <GraduationCap className="w-5 h-5 text-indigo-400" />
+            <div className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center font-bold text-xs tracking-tight">
+              M
             </div>
-          </div>
+            <span className="text-sm font-semibold tracking-tight text-slate-900 hidden sm:inline">
+              MindLC
+            </span>
+          </button>
 
-          {/* 3-Tier Workspace Switcher (`TIER_1` | `TIER_2` | `TIER_3`) */}
-          <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
-            {TIER_PILLS.map((tp) => {
-              const isAct = activeTierId === tp.id;
-              const tWs = tierWorkspaces[tp.id];
+          <div className="h-4 w-[1px] bg-slate-200 hidden sm:block" />
+
+          {/* 3 Product Tier Tabs (Segmented Control) */}
+          <nav
+            aria-label="Product Tier Workspaces"
+            className="inline-flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200/80"
+          >
+            {TIER_TAB_ITEMS.map((item) => {
+              const ws = tierWorkspaces[item.id];
+              const isSelected = activeTierId === item.id;
+              const stageTarget =
+                ws.stage_goals[ws.active_stage].target_paid_count;
+              const countPill = `${ws.current_paid_count}/${stageTarget}`;
+
               return (
                 <button
-                  key={tp.id}
-                  type="button"
-                  onClick={() => setActiveTierId(tp.id)}
-                  className={`px-2.5 py-1 rounded-lg text-left transition ${
-                    isAct
-                      ? "bg-slate-900 text-white shadow-2xs"
+                  key={item.id}
+                  onClick={() => {
+                    setActiveTierId(item.id);
+                    if (activeTab !== "copilot") {
+                      setActiveTab("copilot");
+                    }
+                  }}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                    isSelected
+                      ? "bg-white text-slate-900 shadow-sm border border-slate-200/90 font-semibold"
                       : "text-slate-600 hover:text-slate-900"
                   }`}
                 >
-                  <div className="text-[11px] font-extrabold leading-tight flex items-center gap-1">
-                    <span>{tp.short}</span>
-                    {tWs.reality_gate_status === "LOCKED" && (
-                      <Lock className="w-2.5 h-2.5 text-amber-400" />
-                    )}
-                  </div>
-                  <div
-                    className={`text-[9.5px] font-mono tabular-nums ${
-                      isAct ? "text-indigo-300" : "text-slate-400"
+                  <span>{item.shortLabel}</span>
+                  <span
+                    className={`px-1.5 py-0.5 rounded text-[11px] font-mono ${
+                      isSelected
+                        ? "bg-indigo-50 text-indigo-700 font-semibold"
+                        : "bg-slate-200/70 text-slate-600"
                     }`}
                   >
-                    {tp.price} · {tWs.current_paid_count}/{tWs.north_star_paid_goal}
-                  </div>
+                    {countPill}
+                  </span>
                 </button>
               );
             })}
-          </div>
-
-          {/* North Star Progress Pill for Selected Tier */}
-          <div className="hidden md:flex bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 items-center gap-2.5">
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-[11px] font-semibold text-slate-500">
-                  Paid:
-                </span>
-                <span className="text-xs font-extrabold text-slate-900 tabular-nums">
-                  {paidStudentCount}{" "}
-                  <span className="text-slate-400 font-normal">
-                    / {currentTierWs.north_star_paid_goal}
-                  </span>
-                </span>
-              </div>
-              <div className="flex items-center gap-1 mt-1 w-28">
-                <div
-                  className="h-1.5 flex-1 bg-slate-200 rounded-l-full overflow-hidden"
-                  title={`Stage 1 Target: ${s1Max}`}
-                >
-                  <div
-                    className="h-full bg-indigo-600 transition-all"
-                    style={{ width: `${seg1Pct}%` }}
-                  />
-                </div>
-                <div
-                  className="h-1.5 flex-1 bg-slate-200 overflow-hidden"
-                  title={`Stage 2 Target: ${s2Max}`}
-                >
-                  <div
-                    className="h-full bg-indigo-600 transition-all"
-                    style={{ width: `${seg2Pct}%` }}
-                  />
-                </div>
-                <div
-                  className="h-1.5 flex-1 bg-slate-200 rounded-r-full overflow-hidden"
-                  title={`Stage 3 Target: ${s3Max}`}
-                >
-                  <div
-                    className="h-full bg-emerald-600 transition-all"
-                    style={{ width: `${seg3Pct}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-            <div className="text-[10px] font-mono text-slate-400 leading-tight hidden 2xl:block tabular-nums">
-              <div>
-                {s1Max} · {s2Max} · {s3Max}
-              </div>
-              <div className="text-slate-600 font-bold">
-                ${(paidStudentCount * currentTierWs.monthly_price_cad).toLocaleString()}{" "}
-                MRR
-              </div>
-            </div>
-          </div>
+          </nav>
         </div>
 
-        {/* MODULE 2: Active Bottleneck Lock Badge (Popover with Editable Stage 1/2/3 Goals!) */}
-        <div className="relative shrink-0">
+        {/* RIGHT SIDE: 3 Compact On-Demand Trigger Buttons (Click to Reveal) */}
+        <div className="flex items-center gap-2">
+          {/* 1. [🎯 Stage X · Goals] */}
           <button
-            type="button"
-            onClick={() => setIsBottleneckPopoverOpen(!isBottleneckPopoverOpen)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100/80 border border-amber-300 text-amber-950 text-xs font-bold transition"
+            onClick={() => setStageFunnelModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 transition-colors shadow-2xs"
+            title="View & Edit Stage 1/2/3 Roadmap and 4-Step Mini-Funnel"
           >
-            <span className="truncate max-w-[230px] sm:max-w-xs">
-              🔒 {stageGoal.short_badge}
+            <Target className="w-3.5 h-3.5 text-indigo-600" />
+            <span className="font-semibold text-slate-800">
+              {activeStageNumber}
             </span>
-            <ChevronDown className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+            <span className="text-slate-400">·</span>
+            <span className="text-slate-600">Goals</span>
           </button>
 
-          {isBottleneckPopoverOpen && (
-            <div className="absolute left-0 mt-2 w-[440px] bg-white rounded-2xl border border-slate-200 shadow-2xl p-4 z-50 space-y-3.5 text-xs">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-                <div>
-                  <span className="font-extrabold text-slate-900 block">
-                    {currentTierWs.tier_name} ({currentTierWs.price_label})
+          {/* 2. [● Reality Gate] */}
+          <button
+            onClick={() => setRealityGateModalOpen(true)}
+            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors shadow-2xs ${
+              realityGateStatus === "LOCKED"
+                ? "bg-amber-50/90 hover:bg-amber-100/80 text-amber-900 border-amber-300"
+                : "bg-white hover:bg-slate-50 text-slate-700 border-slate-200"
+            }`}
+            title="Open 60-Second Weekly Reality Gate Check"
+          >
+            <span
+              className={`w-2 h-2 rounded-full ${
+                realityGateStatus === "LOCKED"
+                  ? "bg-amber-500 animate-pulse"
+                  : "bg-emerald-500"
+              }`}
+            />
+            <span>Reality Gate</span>
+          </button>
+
+          {/* 3. [💬 VoC Vault] */}
+          <button
+            onClick={() => setVocVaultOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 transition-colors shadow-2xs"
+            title="Open Verbatim Parent Quote (VoC) Slide-Over Vault"
+          >
+            <MessageSquareQuote className="w-3.5 h-3.5 text-slate-600" />
+            <span className="hidden md:inline">VoC Vault</span>
+            <span className="px-1.5 py-0.2 rounded-full text-[11px] font-mono bg-slate-100 text-slate-700 border border-slate-200">
+              {vocVault.length}
+            </span>
+          </button>
+
+          {/* Secondary More Views Popover Button */}
+          <div className="relative">
+            <button
+              onClick={() => setShowUtilityMenu((prev) => !prev)}
+              className={`p-1.5 rounded-lg border text-xs transition-colors ${
+                activeTab !== "copilot" || showUtilityMenu
+                  ? "bg-slate-900 text-white border-slate-900"
+                  : "bg-white text-slate-500 hover:text-slate-800 border-slate-200"
+              }`}
+              title="More Strategic Views (Planner, Market Intel, Brand Persona)"
+            >
+              <Compass className="w-4 h-4" />
+            </button>
+
+            {showUtilityMenu && (
+              <div className="absolute right-0 mt-2 w-52 bg-white rounded-xl shadow-lg border border-slate-200 py-1.5 z-50">
+                <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                  Workspace Views
+                </div>
+                {(
+                  [
+                    { id: "copilot", label: "📄 Proposal Focus Canvas" },
+                    { id: "planner", label: "🗓️ Multi-Horizon CMO Planner" },
+                    { id: "intel", label: "🔭 Ontario Market & Competitors" },
+                    { id: "skills", label: "⚡ AI Playbook Skills" },
+                    { id: "settings", label: "🛡️ Brand Guardrails" },
+                  ] as { id: NavigationTab; label: string }[]
+                ).map((nav) => (
+                  <button
+                    key={nav.id}
+                    onClick={() => {
+                      setActiveTab(nav.id);
+                      setShowUtilityMenu(false);
+                    }}
+                    className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between ${
+                      activeTab === nav.id
+                        ? "bg-indigo-50 text-indigo-700 font-semibold"
+                        : "text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    <span>{nav.label}</span>
+                    {activeTab === nav.id && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* ===================================================================== */}
+      {/* 2. ON-DEMAND MODAL A: STAGE & FUNNEL MODAL (`[🎯 Stage X · Goals]`)   */}
+      {/* ===================================================================== */}
+      {isStageFunnelModalOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-[1px] flex items-center justify-center p-4 overflow-y-auto"
+          onClick={() => setStageFunnelModalOpen(false)}
+        >
+          <div
+            className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-5xl w-full overflow-hidden my-8"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/70">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                    {activeTier.tier_name}
                   </span>
-                  <span className="text-[11px] text-slate-500">
-                    {currentTierWs.offer_summary}
+                  <span className="text-xs text-slate-500 font-mono">
+                    {activeTier.price_label}
                   </span>
                 </div>
+                <h2 className="text-base font-semibold text-slate-900 mt-1">
+                  3-Stage Growth Roadmap &amp; Conversion Funnel Telemetry
+                </h2>
+              </div>
+
+              <div className="flex items-center gap-3">
+                {/* Quick simulation control for active paid students in this tier */}
+                <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200 text-xs">
+                  <span className="text-slate-500">Current Paid:</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={1000}
+                    value={activeTier.current_paid_count}
+                    onChange={(e) =>
+                      setPaidStudentCount(
+                        Math.max(0, parseInt(e.target.value || "0", 10))
+                      )
+                    }
+                    className="w-14 font-mono font-semibold text-slate-900 border border-slate-200 rounded px-1.5 py-0.5 text-center"
+                  />
+                </div>
+
+                {/* Edit Goals Toggle */}
                 <button
-                  onClick={() => setIsBottleneckPopoverOpen(false)}
-                  className="text-slate-400 hover:text-slate-600"
+                  onClick={() => setIsEditingGoals((prev) => !prev)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                    isEditingGoals
+                      ? "bg-indigo-600 text-white border-indigo-600"
+                      : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                  }`}
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>{isEditingGoals ? "Done Editing" : "Edit Goals"}</span>
+                </button>
+
+                <button
+                  onClick={() => setStageFunnelModalOpen(false)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
+            </div>
 
-              {/* Stage 1 / Stage 2 / Stage 3 Switcher & Editable Goals */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold uppercase text-slate-500">
-                    Select or Edit Stage Goals ({currentTierWs.tier_short_name}):
+            <div className="p-6 space-y-6 max-h-[82vh] overflow-y-auto">
+              {/* 3-STAGE ROADMAP (3 Horizontal Cards for Stage 1, Stage 2, Stage 3) */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    Stage 1 / 2 / 3 Strategic Guardrails ({activeTier.tier_name})
                   </span>
-                  <span className="text-[11px] text-slate-400 tabular-nums">
-                    Paid Count: {paidStudentCount}
+                  <span className="text-xs text-slate-500">
+                    Click any stage card to set it as the active stage filter
                   </span>
                 </div>
 
-                {(["STAGE_1", "STAGE_2", "STAGE_3"] as StageId[]).map((st) => {
-                  const g = currentTierWs.stage_goals[st];
-                  const isCurrent = activeBottleneckStage === st;
-                  const isEditingThis = editingStageId === st;
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {STAGE_ORDER.map((stageId, idx) => {
+                    const goal = activeTier.stage_goals[stageId];
+                    const isActiveStage = activeTier.active_stage === stageId;
 
-                  return (
-                    <div
-                      key={st}
-                      className={`p-3 rounded-xl border transition ${
-                        isCurrent
-                          ? "bg-indigo-50/60 border-indigo-400"
-                          : "bg-slate-50 border-slate-200"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setActiveStageOverride(st)}
-                          className="text-left font-bold text-slate-900 hover:text-indigo-700 flex items-center gap-1.5"
-                        >
-                          <span
-                            className={`w-2 h-2 rounded-full ${
-                              isCurrent ? "bg-indigo-600" : "bg-slate-300"
-                            }`}
-                          />
-                          <span>{g.stage_title}</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            isEditingThis
-                              ? setEditingStageId(null)
-                              : handleOpenStageGoalEdit(st)
+                    return (
+                      <div
+                        key={stageId}
+                        onClick={() => {
+                          if (!isEditingGoals) {
+                            setActiveStageOverride(stageId);
                           }
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white border border-slate-200 text-[10px] font-bold text-slate-600 hover:text-indigo-700"
-                        >
-                          <Edit3 className="w-3 h-3" />
-                          {isEditingThis ? "Close" : "Edit Goal"}
-                        </button>
-                      </div>
-
-                      <div className="text-[11px] text-slate-600 mt-1 pl-3.5 tabular-nums">
-                        Target: <strong>{g.primary_kpi_name} ≥ {g.primary_kpi_target_pct}%</strong>{" "}
-                        · {g.secondary_kpi_summary}
-                      </div>
-
-                      {isEditingThis && (
-                        <div className="mt-2.5 pt-2.5 border-t border-slate-200 grid grid-cols-3 gap-2">
-                          <div className="col-span-2">
-                            <label className="block text-[10px] font-bold text-slate-500">
-                              Primary KPI Name
-                            </label>
-                            <input
-                              type="text"
-                              value={editKpiName}
-                              onChange={(e) => setEditKpiName(e.target.value)}
-                              className="w-full mt-0.5 px-2 py-1 rounded border border-slate-300 bg-white text-xs"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-bold text-slate-500">
-                              Target %
-                            </label>
-                            <input
-                              type="number"
-                              value={editKpiTargetPct}
-                              onChange={(e) =>
-                                setEditKpiTargetPct(Number(e.target.value))
-                              }
-                              className="w-full mt-0.5 px-2 py-1 rounded border border-slate-300 bg-white text-xs font-bold tabular-nums"
-                            />
-                          </div>
-                          <div className="col-span-2">
-                            <label className="block text-[10px] font-bold text-slate-500">
-                              Stage Paid Student Milestone
-                            </label>
-                            <input
-                              type="number"
-                              value={editTargetPaid}
-                              onChange={(e) =>
-                                setEditTargetPaid(Number(e.target.value))
-                              }
-                              className="w-full mt-0.5 px-2 py-1 rounded border border-slate-300 bg-white text-xs font-bold tabular-nums"
-                            />
-                          </div>
-                          <div className="flex items-end">
-                            <button
-                              type="button"
-                              onClick={() => handleSaveStageGoalEdit(st)}
-                              className="w-full py-1.5 rounded bg-indigo-600 text-white font-bold text-[11px]"
+                        }}
+                        className={`rounded-xl border p-4 transition-all flex flex-col justify-between ${
+                          isActiveStage
+                            ? "border-indigo-600 bg-indigo-50/25 ring-2 ring-indigo-600/15"
+                            : "border-slate-200 bg-white hover:border-slate-300"
+                        } ${!isEditingGoals ? "cursor-pointer" : ""}`}
+                      >
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+                                isActiveStage
+                                  ? "bg-indigo-600 text-white"
+                                  : "bg-slate-100 text-slate-700"
+                              }`}
                             >
-                              Save Goal
-                            </button>
+                              Stage {idx + 1} · {goal.min_paid}–{goal.max_paid}{" "}
+                              paid
+                            </span>
+                            {isActiveStage && (
+                              <span className="text-[11px] font-semibold text-indigo-700 flex items-center gap-1">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Active Stage
+                              </span>
+                            )}
                           </div>
+
+                          <div>
+                            <h3 className="text-sm font-semibold text-slate-900">
+                              {goal.stage_title}
+                            </h3>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              {goal.secondary_kpi_summary}
+                            </p>
+                          </div>
+
+                          {isEditingGoals ? (
+                            <div
+                              className="space-y-2 pt-2 border-t border-slate-200/80"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <div>
+                                <label className="block text-[10px] font-semibold uppercase text-slate-500">
+                                  Milestone Student Cap
+                                </label>
+                                <input
+                                  type="number"
+                                  value={goal.target_paid_count}
+                                  onChange={(e) =>
+                                    updateTierStageGoal(activeTierId, stageId, {
+                                      target_paid_count:
+                                        parseInt(e.target.value || "1", 10) ||
+                                        1,
+                                    })
+                                  }
+                                  className="mt-0.5 w-full text-xs font-mono border border-slate-300 rounded px-2 py-1"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-semibold uppercase text-slate-500">
+                                  Primary Goal Metric
+                                </label>
+                                <input
+                                  type="text"
+                                  value={goal.primary_kpi_name}
+                                  onChange={(e) =>
+                                    updateTierStageGoal(activeTierId, stageId, {
+                                      primary_kpi_name: e.target.value,
+                                    })
+                                  }
+                                  className="mt-0.5 w-full text-xs border border-slate-300 rounded px-2 py-1"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-semibold uppercase text-emerald-700">
+                                  Allowed Scope (comma-separated)
+                                </label>
+                                <textarea
+                                  rows={2}
+                                  value={goal.allowed_scope.join(", ")}
+                                  onChange={(e) =>
+                                    updateTierStageGoal(activeTierId, stageId, {
+                                      allowed_scope: e.target.value
+                                        .split(",")
+                                        .map((s) => s.trim())
+                                        .filter(Boolean),
+                                    })
+                                  }
+                                  className="mt-0.5 w-full text-xs border border-slate-300 rounded px-2 py-1"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-semibold uppercase text-rose-700">
+                                  Blocked Scope (comma-separated)
+                                </label>
+                                <textarea
+                                  rows={2}
+                                  value={goal.blocked_scope.join(", ")}
+                                  onChange={(e) =>
+                                    updateTierStageGoal(activeTierId, stageId, {
+                                      blocked_scope: e.target.value
+                                        .split(",")
+                                        .map((s) => s.trim())
+                                        .filter(Boolean),
+                                    })
+                                  }
+                                  className="mt-0.5 w-full text-xs border border-slate-300 rounded px-2 py-1"
+                                />
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="bg-slate-50 rounded-lg p-2.5 border border-slate-200/80">
+                                <div className="text-[10px] font-semibold uppercase text-slate-400">
+                                  Primary Goal Metric
+                                </div>
+                                <div className="text-xs font-semibold text-slate-800 mt-0.5">
+                                  {goal.primary_kpi_name} (Target ≥{" "}
+                                  {goal.primary_kpi_target_pct}%)
+                                </div>
+                              </div>
+
+                              <div className="space-y-1.5 text-xs">
+                                <div>
+                                  <span className="font-semibold text-emerald-700">
+                                    Allowed:{" "}
+                                  </span>
+                                  <span className="text-slate-600">
+                                    {goal.allowed_scope.join(" · ")}
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="font-semibold text-rose-700">
+                                    Blocked:{" "}
+                                  </span>
+                                  <span className="text-slate-500">
+                                    {goal.blocked_scope.join(" · ")}
+                                  </span>
+                                </div>
+                              </div>
+                            </>
+                          )}
                         </div>
-                      )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 4-STEP MINI-FUNNEL FOR THIS TIER (Directly beneath the 3 Stage Cards) */}
+              <div className="bg-slate-50 rounded-xl border border-slate-200 p-5">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+                  <div>
+                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                      4-Step Mini-Funnel ({activeTier.tier_name})
+                    </span>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Ground-truth conversion telemetry from the latest Weekly
+                      Reality Log ({latestLog?.week_start_date || "No log"})
+                    </p>
+                  </div>
+
+                  {weakestRateObj && (
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-50 border border-amber-300 text-amber-900 text-xs font-medium">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                      <span>
+                        Weakest Conversion Link:{" "}
+                        <strong>{weakestRateObj.label}</strong> (
+                        {weakestRateObj.rate}%)
+                      </span>
                     </div>
-                  );
-                })}
-              </div>
-
-              {/* Allowed vs Blocked Scope for Active Stage */}
-              <div className="grid grid-cols-2 gap-2.5">
-                <div className="p-2.5 rounded-lg bg-emerald-50/70 border border-emerald-200 space-y-1">
-                  <div className="font-bold text-emerald-900 text-[11px]">
-                    ✓ Allowed ({activeBottleneckStage})
-                  </div>
-                  <ul className="text-[11px] text-emerald-800 space-y-0.5">
-                    {stageGoal.allowed_scope.map((item, i) => (
-                      <li key={i}>• {item}</li>
-                    ))}
-                  </ul>
+                  )}
                 </div>
 
-                <div className="p-2.5 rounded-lg bg-rose-50/70 border border-rose-200 space-y-1">
-                  <div className="font-bold text-rose-900 text-[11px]">
-                    ✕ Blocked &amp; Tone Guardrails
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  {/* Step 1 */}
+                  <div className="bg-white rounded-lg border border-slate-200 p-3.5">
+                    <div className="text-[11px] text-slate-500 font-medium">
+                      1. {step1Label}
+                    </div>
+                    <div className="text-xl font-bold font-mono text-slate-900 mt-1">
+                      {funnelMetrics.reach_or_contacts}
+                    </div>
+                    <div className="text-[11px] text-slate-400 mt-1">
+                      Top-of-funnel volume
+                    </div>
                   </div>
-                  <ul className="text-[11px] text-rose-800 space-y-0.5">
-                    {stageGoal.blocked_scope.map((item, i) => (
-                      <li key={i}>• {item}</li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
 
-              {/* Simulate Paid Count Input */}
-              <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                <span className="text-[11px] font-semibold text-slate-600">
-                  Simulate {currentTierWs.tier_short_name} Paid Student Count:
-                </span>
-                <input
-                  type="number"
-                  min={0}
-                  max={300}
-                  value={paidStudentCount}
-                  onChange={(e) => setPaidStudentCount(Number(e.target.value))}
-                  className="w-20 px-2.5 py-1 rounded-lg border border-slate-300 text-xs font-extrabold text-center tabular-nums"
-                />
-              </div>
+                  {/* Step 2 */}
+                  <div
+                    className={`rounded-lg border p-3.5 ${
+                      weakestRateObj?.index === 0
+                        ? "bg-amber-50/70 border-amber-300"
+                        : "bg-white border-slate-200"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-slate-500 font-medium">
+                        2. {step2Label}
+                      </span>
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[11px] font-mono font-semibold ${
+                          weakestRateObj?.index === 0
+                            ? "bg-amber-200/80 text-amber-950"
+                            : "bg-slate-100 text-slate-700"
+                        }`}
+                      >
+                        {funnelRates.contactToBookedPct}%
+                      </span>
+                    </div>
+                    <div className="text-xl font-bold font-mono text-slate-900 mt-1">
+                      {funnelMetrics.diag_booked}
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-1">
+                      Conversion from Step 1
+                    </div>
+                  </div>
 
-              {/* Workspace Module Switcher */}
-              <div className="pt-2 border-t border-slate-100">
-                <div className="flex flex-wrap gap-1.5">
-                  {secondaryViews.map((sv) => (
-                    <button
-                      key={sv.id}
-                      type="button"
-                      onClick={() => {
-                        setActiveTab(sv.id);
-                        setIsBottleneckPopoverOpen(false);
-                      }}
-                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold border ${
-                        activeTab === sv.id
-                          ? "bg-slate-900 text-white border-slate-900"
-                          : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
-                      }`}
-                    >
-                      {sv.icon}
-                      {sv.label}
-                    </button>
-                  ))}
+                  {/* Step 3 */}
+                  <div
+                    className={`rounded-lg border p-3.5 ${
+                      weakestRateObj?.index === 1
+                        ? "bg-amber-50/70 border-amber-300"
+                        : "bg-white border-slate-200"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-slate-500 font-medium">
+                        3. {step3Label}
+                      </span>
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[11px] font-mono font-semibold ${
+                          weakestRateObj?.index === 1
+                            ? "bg-amber-200/80 text-amber-950"
+                            : "bg-slate-100 text-slate-700"
+                        }`}
+                      >
+                        {funnelRates.bookedToCompletedPct}%
+                      </span>
+                    </div>
+                    <div className="text-xl font-bold font-mono text-slate-900 mt-1">
+                      {funnelMetrics.diag_completed}
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-1">
+                      Show-up / completion rate
+                    </div>
+                  </div>
+
+                  {/* Step 4 */}
+                  <div
+                    className={`rounded-lg border p-3.5 ${
+                      weakestRateObj?.index === 2
+                        ? "bg-amber-50/70 border-amber-300"
+                        : "bg-white border-slate-200"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-slate-500 font-medium">
+                        4. {step4Label}
+                      </span>
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[11px] font-mono font-semibold ${
+                          weakestRateObj?.index === 2
+                            ? "bg-amber-200/80 text-amber-950"
+                            : "bg-emerald-50 text-emerald-700"
+                        }`}
+                      >
+                        {funnelRates.completedToPaidPct}%
+                      </span>
+                    </div>
+                    <div className="text-xl font-bold font-mono text-slate-900 mt-1">
+                      {funnelMetrics.paid_conversions}
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-1">
+                      Diagnostic-to-Paid close
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
-          )}
-        </div>
-
-        {/* MODULE 3: Live Mini-Funnel Health Strip (Uses Tier-Specific Funnel Step Labels!) */}
-        <div className="hidden xl:flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs tabular-nums">
-          <div className="px-2 py-0.5 rounded-md text-slate-700">
-            <span className="text-slate-500">{lbl1.split("/")[0]}</span>{" "}
-            <strong className="font-bold text-slate-900">
-              {metrics.reach_or_contacts}
-            </strong>
           </div>
-
-          <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
-
-          <div
-            className={`px-2 py-0.5 rounded-md font-medium ${
-              lowestStepKey === "booked"
-                ? "bg-amber-100 text-amber-950 border border-amber-300 font-bold"
-                : "text-slate-700"
-            }`}
-          >
-            <span>{lbl2}</span> <strong>{rates.contactToBookedPct}%</strong>
-          </div>
-
-          <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
-
-          <div
-            className={`px-2 py-0.5 rounded-md font-medium ${
-              lowestStepKey === "done"
-                ? "bg-amber-100 text-amber-950 border border-amber-300 font-bold"
-                : "text-slate-700"
-            }`}
-          >
-            <span>{lbl3}</span> <strong>{rates.bookedToCompletedPct}%</strong>
-          </div>
-
-          <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
-
-          <div
-            className={`px-2.5 py-0.5 rounded-md ${
-              lowestStepKey === "paid" ||
-              rates.completedToPaidPct < stageGoal.primary_kpi_target_pct
-                ? "bg-rose-100 text-rose-900 border border-rose-300 font-extrabold"
-                : "bg-emerald-50 text-emerald-800 font-bold"
-            }`}
-          >
-            <span>{lbl4}</span> <strong>{rates.completedToPaidPct}%</strong>
-            {rates.completedToPaidPct < stageGoal.primary_kpi_target_pct && (
-              <span className="ml-1 text-[10px] uppercase tracking-wider">
-                (&lt;{stageGoal.primary_kpi_target_pct}%)
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* MODULE 4: Reality Gate Status Button (Per-Tier) */}
-        <div className="flex items-center gap-2 shrink-0">
-          {isSampleSeedActive && (
-            <span
-              onClick={() => setRealityGateModalOpen(true)}
-              className="hidden 2xl:inline-flex items-center px-2 py-1 rounded-md bg-slate-100 text-slate-600 border border-slate-200 text-[11px] font-medium cursor-pointer hover:bg-slate-200"
-            >
-              Sample Seed
-            </span>
-          )}
-
-          {isLocked ? (
-            <button
-              type="button"
-              onClick={() => setRealityGateModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs shadow-sm animate-pulse transition"
-            >
-              <AlertTriangle className="w-3.5 h-3.5" />
-              ⚠️ Log {currentTierWs.tier_short_name} Reality (60s)
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setRealityGateModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-xs transition"
-            >
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              ✓ {currentTierWs.tier_id} Gate Current
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={toggleRealityGateLockSimulation}
-            title={`Toggle Reality Gate Lock for ${currentTierWs.tier_name}`}
-            className="p-2 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition"
-          >
-            {isLocked ? (
-              <Lock className="w-4 h-4 text-amber-600" />
-            ) : (
-              <Unlock className="w-4 h-4" />
-            )}
-          </button>
-        </div>
-      </header>
-
-      {/* Diagnostic Summary Toast Banner */}
-      {diagnosticToast && (
-        <div className="bg-slate-900 text-white px-6 py-2.5 border-b border-slate-800 flex items-center justify-between gap-4 text-xs">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
-            <span className="font-medium">{diagnosticToast}</span>
-          </div>
-          <button
-            onClick={clearDiagnosticToast}
-            className="text-slate-400 hover:text-white"
-          >
-            <X className="w-4 h-4" />
-          </button>
         </div>
       )}
 
-      {/* =====================================================================
-          WEEKLY REALITY GATE MODAL (Scoped to Active Tier + Multi-Tier Option)
-          ===================================================================== */}
+      {/* ===================================================================== */}
+      {/* 3. ON-DEMAND MODAL B: 60-SECOND REALITY GATE MODAL (`[● Reality Gate]`)*/}
+      {/* ===================================================================== */}
       {isRealityGateModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-2xl w-full border border-slate-200 shadow-2xl overflow-hidden my-8">
-            <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">
-              <div>
-                <div className="text-[11px] font-bold uppercase tracking-wider text-amber-400">
-                  Safeguard 1 · {currentTierWs.tier_name} ({currentTierWs.price_label})
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-[1px] flex items-center justify-center p-4 overflow-y-auto"
+          onClick={() => setRealityGateModalOpen(false)}
+        >
+          <div
+            className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-2xl w-full overflow-hidden my-8"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-2.5">
+                <span
+                  className={`w-2.5 h-2.5 rounded-full ${
+                    realityGateStatus === "LOCKED"
+                      ? "bg-amber-500"
+                      : "bg-emerald-500"
+                  }`}
+                />
+                <div>
+                  <h2 className="text-base font-semibold text-slate-900">
+                    60-Second Weekly Reality Gate ({activeTier.tier_name})
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Ground-truth numbers + 2 verbatim parent quotes required to
+                    unlock AI proposal generation.
+                  </p>
                 </div>
-                <h2 className="font-bold text-base mt-0.5">
-                  Log Weekly Funnel Reality &amp; Shared VoC Parent Quotes
-                </h2>
               </div>
-              <button
-                onClick={() => setRealityGateModalOpen(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-white"
-              >
-                <X className="w-5 h-5" />
-              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={toggleRealityGateLockSimulation}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium border border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+                  title="Simulate Lock / Unlock state for testing"
+                >
+                  {realityGateStatus === "LOCKED" ? (
+                    <>
+                      <Lock className="w-3 h-3 text-amber-600" />
+                      <span>Status: Locked</span>
+                    </>
+                  ) : (
+                    <>
+                      <Unlock className="w-3 h-3 text-emerald-600" />
+                      <span>Status: Current</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={() => setRealityGateModalOpen(false)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
-            <form onSubmit={handleSubmitRealityCheck} className="p-6 space-y-5">
-              {formError && (
-                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold">
-                  {formError}
+            <form onSubmit={handleRealityGateSubmit} className="p-6 space-y-5">
+              {gateError && (
+                <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700 font-medium">
+                  {gateError}
                 </div>
               )}
 
-              {/* Step 1: Tier-Specific Funnel Labels & Live Conversion % */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                    1. {currentTierWs.tier_short_name} Funnel Numbers (`{weekStart}`)
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                <div className="col-span-2 sm:col-span-1">
+                  <label className="block text-[11px] font-medium text-slate-600">
+                    Week Of
                   </label>
                   <input
                     type="date"
-                    value={weekStart}
-                    onChange={(e) => setWeekStart(e.target.value)}
-                    className="px-2 py-1 rounded border border-slate-300 text-xs font-semibold tabular-nums"
+                    value={weekStartDate}
+                    onChange={(e) => setWeekStartDate(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-mono"
                   />
                 </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 tabular-nums">
-                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-                    <label className="block text-[11px] font-semibold text-slate-500 truncate">
-                      {lbl1}
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      value={reach}
-                      onChange={(e) => setReach(Number(e.target.value))}
-                      className="w-full mt-1 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-base font-extrabold text-slate-900"
-                    />
-                    <div className="text-[11px] text-slate-400 mt-1">
-                      Step 1 Input
-                    </div>
-                  </div>
-
-                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-                    <label className="block text-[11px] font-semibold text-slate-500 truncate">
-                      {lbl2}
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      value={booked}
-                      onChange={(e) => setBooked(Number(e.target.value))}
-                      className="w-full mt-1 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-base font-extrabold text-slate-900"
-                    />
-                    <div className="text-[11px] font-semibold text-slate-600 mt-1">
-                      {modalLiveRates.contactToBookedPct}% Rate
-                    </div>
-                  </div>
-
-                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-                    <label className="block text-[11px] font-semibold text-slate-500 truncate">
-                      {lbl3}
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      value={completed}
-                      onChange={(e) => setCompleted(Number(e.target.value))}
-                      className="w-full mt-1 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-base font-extrabold text-slate-900"
-                    />
-                    <div className="text-[11px] font-semibold text-slate-600 mt-1">
-                      {modalLiveRates.bookedToCompletedPct}% Completion
-                    </div>
-                  </div>
-
-                  <div
-                    className={`p-3 rounded-xl border ${
-                      modalLiveRates.completedToPaidPct <
-                      stageGoal.primary_kpi_target_pct
-                        ? "bg-amber-50/70 border-amber-300"
-                        : "bg-emerald-50/70 border-emerald-300"
-                    }`}
-                  >
-                    <label className="block text-[11px] font-bold text-slate-700 truncate">
-                      {lbl4}
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      value={paid}
-                      onChange={(e) => setPaid(Number(e.target.value))}
-                      className="w-full mt-1 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-base font-extrabold text-slate-900"
-                    />
-                    <div
-                      className={`text-[11px] font-bold mt-1 ${
-                        modalLiveRates.completedToPaidPct <
-                        stageGoal.primary_kpi_target_pct
-                          ? "text-amber-900"
-                          : "text-emerald-800"
-                      }`}
-                    >
-                      {modalLiveRates.completedToPaidPct}% (Target ≥
-                      {stageGoal.primary_kpi_target_pct}%)
-                    </div>
-                  </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-600 truncate">
+                    1. {step1Label}
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={reachOrContacts}
+                    onChange={(e) =>
+                      setReachOrContacts(parseInt(e.target.value || "0", 10))
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-600 truncate">
+                    2. {step2Label}
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={diagBooked}
+                    onChange={(e) =>
+                      setDiagBooked(parseInt(e.target.value || "0", 10))
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-600 truncate">
+                    3. {step3Label}
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={diagCompleted}
+                    onChange={(e) =>
+                      setDiagCompleted(parseInt(e.target.value || "0", 10))
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-600 truncate">
+                    4. {step4Label}
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={paidConversions}
+                    onChange={(e) =>
+                      setPaidConversions(parseInt(e.target.value || "0", 10))
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-mono"
+                  />
                 </div>
               </div>
 
-              {/* Step 2: Verbatim Parent Quotes with Tier Scope Tag (`TIER_1` | `TIER_2` | `TIER_3` | `ALL`) */}
+              {/* Verbatim Parent Quotes (Minimum 2) */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                    2. Verbatim Parent Quotes (Saved to Shared VoC Vault)
+                  <label className="text-xs font-semibold text-slate-800">
+                    Verbatim Parent Quotes Heard This Week (Min 2 Exact Quotes)
                   </label>
                   <button
                     type="button"
                     onClick={() =>
-                      setQuotes([
-                        ...quotes,
+                      setQuotes((prev) => [
+                        ...prev,
                         {
                           quote_text: "",
                           context_tag: "trust",
@@ -848,10 +942,10 @@ export function SafeguardTopBar() {
                         },
                       ])
                     }
-                    className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-700"
+                    className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-800"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    Add Quote
+                    <span>Add Quote</span>
                   </button>
                 </div>
 
@@ -860,142 +954,276 @@ export function SafeguardTopBar() {
                     key={idx}
                     className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2"
                   >
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-semibold text-slate-500">
+                        Parent Quote #{idx + 1}
+                      </span>
                       <div className="flex items-center gap-2">
-                        <span className="text-[11px] font-bold text-slate-500">
-                          Quote #{idx + 1}
-                        </span>
                         <select
                           value={q.tier_id}
-                          onChange={(e) =>
-                            setQuotes(
-                              quotes.map((item, i) =>
-                                i === idx
-                                  ? {
-                                      ...item,
-                                      tier_id: e.target.value as VoCTierTag,
-                                    }
-                                  : item
-                              )
-                            )
-                          }
-                          className="px-2 py-0.5 rounded border border-slate-300 bg-white text-[11px] font-bold text-indigo-700"
+                          onChange={(e) => {
+                            const updated = [...quotes];
+                            updated[idx].tier_id = e.target
+                              .value as VoCTierTag;
+                            setQuotes(updated);
+                          }}
+                          className="text-[11px] border border-slate-300 rounded px-2 py-0.5 bg-white"
                         >
-                          <option value="ALL">Shared: ALL Tiers</option>
-                          <option value="TIER_1">Tier 1 Only (Self-Coach)</option>
-                          <option value="TIER_2">Tier 2 Only (Hybrid)</option>
-                          <option value="TIER_3">Tier 3 Only (Prime 1:1)</option>
+                          <option value="TIER_1">Tier 1 · Online</option>
+                          <option value="TIER_2">Tier 2 · Managed</option>
+                          <option value="TIER_3">Tier 3 · Prime 1:1</option>
+                          <option value="ALL">All Tiers</option>
+                        </select>
+                        <select
+                          value={q.context_tag}
+                          onChange={(e) => {
+                            const updated = [...quotes];
+                            updated[idx].context_tag = e.target
+                              .value as VerbatimParentQuote["context_tag"];
+                            setQuotes(updated);
+                          }}
+                          className="text-[11px] border border-slate-300 rounded px-2 py-0.5 bg-white"
+                        >
+                          <option value="ai_cheating">ai_cheating</option>
+                          <option value="curriculum">curriculum</option>
+                          <option value="price">price</option>
+                          <option value="trust">trust</option>
+                          <option value="student_motivation">
+                            student_motivation
+                          </option>
                         </select>
                       </div>
-
-                      <div className="flex flex-wrap gap-1">
-                        {CONTEXT_TAGS.map((tag) => (
-                          <button
-                            key={tag.id}
-                            type="button"
-                            onClick={() =>
-                              setQuotes(
-                                quotes.map((item, i) =>
-                                  i === idx
-                                    ? { ...item, context_tag: tag.id }
-                                    : item
-                                )
-                              )
-                            }
-                            className={`px-2 py-0.5 rounded-md text-[11px] font-semibold transition ${
-                              q.context_tag === tag.id
-                                ? "bg-indigo-600 text-white"
-                                : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
-                            }`}
-                          >
-                            {tag.label}
-                          </button>
-                        ))}
-                      </div>
                     </div>
-                    <input
-                      type="text"
+                    <textarea
+                      rows={2}
                       value={q.quote_text}
-                      onChange={(e) =>
-                        setQuotes(
-                          quotes.map((item, i) =>
-                            i === idx
-                              ? { ...item, quote_text: e.target.value }
-                              : item
-                          )
-                        )
-                      }
-                      placeholder="Paste exact unedited parent quote or objection..."
-                      required={idx < 2}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs text-slate-900"
+                      onChange={(e) => {
+                        const updated = [...quotes];
+                        updated[idx].quote_text = e.target.value;
+                        setQuotes(updated);
+                      }}
+                      placeholder="Paste exact words a parent said on a call, DM, or email..."
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-800"
                     />
                   </div>
                 ))}
               </div>
 
-              {/* Step 3: Top Winning Touchpoint + Multi-Tier Unlock Checkbox */}
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
-                    3. Top Winning Touchpoint for {currentTierWs.tier_short_name}
-                  </label>
-                  <input
-                    type="text"
-                    value={touchpoint}
-                    onChange={(e) => setTouchpoint(e.target.value)}
-                    required
-                    className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs text-slate-900"
-                  />
-                </div>
-
-                <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer font-medium">
-                  <input
-                    type="checkbox"
-                    checked={alsoUnlockOtherTiers}
-                    onChange={(e) => setAlsoUnlockOtherTiers(e.target.checked)}
-                    className="rounded border-slate-300 text-indigo-600"
-                  />
-                  <span>
-                    Also mark Reality Gate as UNLOCKED across all 3 product
-                    tiers (`TIER_1`, `TIER_2`, `TIER_3`) for this week
-                  </span>
+              <div>
+                <label className="block text-xs font-semibold text-slate-800">
+                  Top Winning Channel / Touchpoint This Week
                 </label>
+                <input
+                  type="text"
+                  value={topWinningTouchpoint}
+                  onChange={(e) => setTopWinningTouchpoint(e.target.value)}
+                  placeholder="e.g., 15-min post-diagnostic parent debrief call showing K/T/C/A rubric gaps"
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-800"
+                />
               </div>
 
-              <div className="pt-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3">
-                {!pilotWeek0Used ? (
-                  <button
-                    type="button"
-                    onClick={activatePilotWeek0Override}
-                    className="px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 text-xs font-bold transition"
-                  >
-                    ⚡ Pilot Week 0 Bootstrap Override
-                  </button>
-                ) : (
-                  <span className="text-[11px] text-slate-400">
-                    Pilot Week 0 Override used
-                  </span>
-                )}
+              <div className="flex items-center justify-between pt-3 border-t border-slate-200">
+                <label className="inline-flex items-center gap-2 text-xs text-slate-600 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={alsoUnlockAllTiers}
+                    onChange={(e) => setAlsoUnlockAllTiers(e.target.checked)}
+                    className="rounded border-slate-300 text-indigo-600"
+                  />
+                  <span>Sync VoC quotes across all 3 Tiers</span>
+                </label>
 
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setRealityGateModalOpen(false)}
-                    className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 text-xs font-bold"
+                    onClick={activatePilotWeek0Override}
+                    className="px-3 py-2 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-100 border border-slate-200"
                   >
-                    Cancel (Esc)
+                    Load Sample Baseline (Week 0)
                   </button>
                   <button
                     type="submit"
-                    className="inline-flex items-center gap-1.5 px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-sm transition"
+                    className="px-4 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs"
                   >
-                    <CheckCircle2 className="w-4 h-4" />
-                    Submit {currentTierWs.tier_short_name} Reality Log
+                    Save &amp; Unlock Generation
                   </button>
                 </div>
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* 4. ON-DEMAND DRAWER C: VoC VAULT RIGHT SLIDE-OVER (`[💬 VoC Vault]`)  */}
+      {/* ===================================================================== */}
+      {isVocVaultOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/25 backdrop-blur-[1px] flex justify-end"
+          onClick={() => setVocVaultOpen(false)}
+        >
+          <aside
+            className="w-full max-w-[420px] bg-white h-full border-l border-slate-200 shadow-2xl flex flex-col justify-between"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Drawer Header */}
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/70">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                  <MessageSquareQuote className="w-4 h-4 text-indigo-600" />
+                  <span>Verbatim Parent Quote Vault (VoC)</span>
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Exact parent objections logged across weekly Reality Gates
+                </p>
+              </div>
+              <button
+                onClick={() => setVocVaultOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Filter Bar */}
+            <div className="px-4 py-3 border-b border-slate-200 bg-white space-y-2">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {(
+                  [
+                    { id: "SHOW_ALL", label: "All Tiers" },
+                    { id: "TIER_1", label: "Tier 1" },
+                    { id: "TIER_2", label: "Tier 2" },
+                    { id: "TIER_3", label: "Tier 3" },
+                  ] as { id: VoCTierTag | "SHOW_ALL"; label: string }[]
+                ).map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => setVocFilterTier(t.id)}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                      vocFilterTier === t.id
+                        ? "bg-slate-900 text-white"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {(
+                  [
+                    "ALL_TAGS",
+                    "ai_cheating",
+                    "curriculum",
+                    "price",
+                    "trust",
+                    "student_motivation",
+                  ] as const
+                ).map((tag) => (
+                  <button
+                    key={tag}
+                    onClick={() => setVocFilterTag(tag)}
+                    className={`px-2 py-0.5 rounded text-[11px] font-mono border transition-colors ${
+                      vocFilterTag === tag
+                        ? "bg-indigo-50 text-indigo-700 border-indigo-300 font-semibold"
+                        : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
+                    }`}
+                  >
+                    {tag === "ALL_TAGS" ? "all_tags" : `#${tag}`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Quote Cards List */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {filteredVocQuotes.map((q) => (
+                <div
+                  key={q.id}
+                  className="p-3.5 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-all space-y-2.5 shadow-2xs"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono text-[11px] font-semibold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">
+                        {q.id}
+                      </span>
+                      <span
+                        className={`text-[11px] font-mono px-2 py-0.5 rounded border ${
+                          TAG_BADGE_STYLES[q.context_tag]
+                        }`}
+                      >
+                        #{q.context_tag}
+                      </span>
+                    </div>
+                    <span className="text-[11px] font-mono text-slate-400">
+                      {q.tier_id}
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-slate-800 leading-relaxed italic">
+                    &ldquo;{q.quote_text}&rdquo;
+                  </p>
+
+                  <div className="flex items-center justify-between pt-1">
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(q.quote_text);
+                        setCopiedQuoteId(q.id);
+                        setTimeout(() => setCopiedQuoteId(null), 1500);
+                      }}
+                      className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-800"
+                    >
+                      {copiedQuoteId === q.id ? (
+                        <>
+                          <Check className="w-3 h-3 text-emerald-600" />
+                          <span className="text-emerald-700">Copied</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3" />
+                          <span>Copy Quote</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setVocVaultOpen(false);
+                        setActiveTab("copilot");
+                        sendCopilotCommand(
+                          `Incorporate verbatim parent quote [${q.id}] ("${q.quote_text}") directly into the hook and objection handling of this proposal.`
+                        );
+                      }}
+                      className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-600 hover:text-indigo-800"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      <span>Cite in Active Draft</span>
+                      <ArrowRight className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Footer */}
+            <div className="p-3.5 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
+              <span className="text-xs text-slate-500">
+                Showing {filteredVocQuotes.length} of {vocVault.length} parent
+                quotes
+              </span>
+              <button
+                onClick={() => {
+                  setVocVaultOpen(false);
+                  setRealityGateModalOpen(true);
+                }}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-white border border-slate-200 text-slate-700 hover:bg-slate-100"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Log New Quotes</span>
+              </button>
+            </div>
+          </aside>
         </div>
       )}
     </>

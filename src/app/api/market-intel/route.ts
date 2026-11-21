@@ -131,7 +131,7 @@ export async function POST(request: Request) {
           metaDescription || plainText.slice(0, 200) + "...",
         primaryH1: primaryHook,
         h2Headings: h2s,
-        priceSignals: [...new Set(priceMentions)].slice(0, 5),
+        priceSignals: Array.from(new Set(priceMentions)).slice(0, 5),
         mentionsOntarioCodes,
         mentionsSocratic,
         mentionsLearningManager,
