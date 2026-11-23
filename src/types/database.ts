@@ -147,13 +147,33 @@ export interface CMOApprovalChecklist {
   brand_trust: boolean;
 }
 
+export type MarketingProposalStatus =
+  | "IN_REVIEW"
+  | "REFINING"
+  | "APPROVED"
+  | "LIVE"
+  | "KILL_TRIGGERED"
+  | "ARCHIVED";
+
+export type MarketingProposalChannel =
+  | "Email"
+  | "Parent Call"
+  | "Consultation"
+  | "Community"
+  | "Social"
+  | "SMS"
+  | "Landing Page"
+  | string;
+
 export interface MandatoryProposalSchema {
   proposal_id: string;
   tier_id: TierId;
   stage_id: StageId;
   bottleneck_stage: StageId; // Alias for stage_id
+  status?: MarketingProposalStatus;
+  version?: number;
   title: string;
-  channel: string;
+  channel: MarketingProposalChannel;
   target_metric: string;
   cited_voc_quotes: string[];
   single_cta: string;
@@ -168,6 +188,53 @@ export interface MandatoryProposalSchema {
     pivot_action: string;
   };
   revision_notes: string;
+  previous_asset_body?: string;
+}
+
+export type MarketingProposal = MandatoryProposalSchema;
+
+export interface TierPricingConfig {
+  base_monthly_cad: number; // $39 for Tier 1, $139 for Tier 2, $399 for Tier 3
+  semester_pass_5mo_cad: number; // $165 for Tier 1, $590 for Tier 2, $1,795 for Tier 3
+  sibling_addon_monthly_cad: number; // $19 for Tier 1, $79 for Tier 2, $349 for Tier 3
+  intensive_addon_monthly_cad?: number; // +$250/mo for Tier 3 ($649/mo total -> 8x60-min sessions/mo)
+  intensive_semester_pass_5mo_cad?: number; // $2,995 for Tier 3 8x60-min 5-mo pass
+}
+
+export type PeriodClosingStatus = "OPEN" | "AUDITED" | "CLOSED_AND_LOCKED";
+
+export interface MonthlyTierLedgerEntry {
+  id: string;
+  period_month: string; // e.g., "2026-11" (YYYY-MM)
+  period_label: string; // e.g., "November 2026"
+  tier_id: TierId;
+  active_stage: StageId;
+  status: PeriodClosingStatus;
+  // Student & Add-on Unit Counts
+  opening_paid_students: number;
+  new_paid_students: number;
+  churned_students: number;
+  closing_paid_students: number;
+  semester_pass_5mo_count: number;
+  sibling_addon_count: number;
+  intensive_addon_count: number; // Tier 3 +$250/mo 8-session add-on count
+  // Funnel & Ad Spend Actuals
+  reach_or_contacts: number;
+  diag_or_consult_booked: number;
+  diag_or_consult_completed: number;
+  ad_spend_cad: number;
+  tutor_delivery_hours?: number; // For Tier 3 4x60-min vs 8x60-min session cap audit
+  // Calculated & Audited Fields (dynamically computed from pricing + counts)
+  recognized_mrr_cad: number;
+  semester_pass_cash_collected_cad: number;
+  total_gross_cash_cad: number;
+  blended_cac_cad: number;
+  // Dual-View Closing Notes (Finance Ledger Audit + Executive CMO Closing Brief)
+  finance_reconciliation_note: string;
+  cmo_closing_audit_summary: string;
+  next_month_stage_recommendation: string;
+  closed_at?: string;
+  closed_by?: string;
 }
 
 export interface Asset {
@@ -198,8 +265,9 @@ export interface TierWorkspaceState {
   tier_id: TierId;
   tier_name: string; // e.g., "Tier 1 — Online Self-Coach"
   tier_short_name: string; // e.g., "Tier 1 · Self-Coach"
-  price_label: string; // e.g., "$39 CAD/mo Self-Serve" | "$139 CAD/mo Managed Hybrid" | "$349 CAD/mo Prime 1:1"
-  monthly_price_cad: number;
+  price_label: string; // e.g., "$39/mo | 5-mo Pass $165 | Sibling +$19/mo"
+  monthly_price_cad: number; // Base monthly price ($39, $139, $399)
+  pricing_config: TierPricingConfig;
   offer_summary: string;
   target_persona: string;
   tone_guardrail: string;
@@ -213,6 +281,7 @@ export interface TierWorkspaceState {
   stage_goals: Record<StageId, EditableStageGoal>;
   reality_gate_status: RealityGateStatus;
   weekly_reality_logs: WeeklyRealityLog[];
+  monthly_ledger: MonthlyTierLedgerEntry[];
   proposals: Asset[];
   selected_proposal_id: string;
 }

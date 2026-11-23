@@ -8,20 +8,184 @@ import {
   MandatoryProposalSchema,
   MarketingAgent,
   MarketingSkill,
+  MonthlyTierLedgerEntry,
   OntarioTrendSignal,
   PlanHorizon,
   PlannedActivity,
   ScopeDriftWarning,
   StageId,
   TierId,
+  TierPricingConfig,
   TierWorkspaceState,
   VerbatimParentQuote,
   WeeklyFunnelMetrics,
 } from "@/types/database";
 
 // ============================================================================
-// 1. 3-TIER × 3-STAGE DEFAULT STAGE GOALS & AUTO-STAGE RECOMMENDER
+// 1. FINALIZED 3-TIER PRICING DEFAULTS & DYNAMIC REVENUE CALCULATORS (CAD)
+// Never hardcode calculated totals—always derive MRR, Quarterly (MRR×3), ARR (MRR×12)
 // ============================================================================
+
+export const DEFAULT_TIER_PRICING: Record<TierId, TierPricingConfig> = {
+  TIER_1: {
+    base_monthly_cad: 39,
+    semester_pass_5mo_cad: 165,
+    sibling_addon_monthly_cad: 19,
+  },
+  TIER_2: {
+    base_monthly_cad: 139,
+    semester_pass_5mo_cad: 590,
+    sibling_addon_monthly_cad: 79,
+  },
+  TIER_3: {
+    base_monthly_cad: 399,
+    semester_pass_5mo_cad: 1795,
+    sibling_addon_monthly_cad: 349,
+    intensive_addon_monthly_cad: 250, // +$250/mo = $649/mo (8 × 60-min live sessions/mo)
+    intensive_semester_pass_5mo_cad: 2995,
+  },
+};
+
+export function formatTierPriceSummary(
+  tierId: TierId,
+  pricing: TierPricingConfig
+): string {
+  if (tierId === "TIER_3") {
+    const intensiveTotal =
+      pricing.base_monthly_cad + (pricing.intensive_addon_monthly_cad || 250);
+    return `$${pricing.base_monthly_cad}/mo base (4×60m) | +$${
+      pricing.intensive_addon_monthly_cad || 250
+    }/mo Intensive ($${intensiveTotal}/mo 8×60m) | 5-mo Pass $${pricing.semester_pass_5mo_cad.toLocaleString()}/$${(
+      pricing.intensive_semester_pass_5mo_cad || 2995
+    ).toLocaleString()} | Sibling +$${pricing.sibling_addon_monthly_cad}/mo`;
+  }
+  return `$${pricing.base_monthly_cad}/mo | 5-mo Semester Pass $${pricing.semester_pass_5mo_cad} | Sibling +$${pricing.sibling_addon_monthly_cad}/mo`;
+}
+
+export function computeStageExpectedRevenue(params: {
+  targetPaidCount: number;
+  baseMonthlyCad: number;
+  siblingAddonCount?: number;
+  siblingAddonMonthlyCad?: number;
+  intensiveAddonCount?: number;
+  intensiveAddonMonthlyCad?: number;
+}) {
+  const baseMrr = params.targetPaidCount * params.baseMonthlyCad;
+  const siblingMrr =
+    (params.siblingAddonCount || 0) * (params.siblingAddonMonthlyCad || 0);
+  const intensiveMrr =
+    (params.intensiveAddonCount || 0) * (params.intensiveAddonMonthlyCad || 0);
+  const expectedMrr = baseMrr + siblingMrr + intensiveMrr;
+  const expectedQuarterlyGross = expectedMrr * 3;
+  const expectedArr = expectedMrr * 12;
+
+  return {
+    baseMrr,
+    siblingMrr,
+    intensiveMrr,
+    expectedMrr,
+    expectedQuarterlyGross,
+    expectedArr,
+  };
+}
+
+export function computeCombined3TierBenchmarks(
+  tierWorkspaces: Record<TierId, TierWorkspaceState>
+) {
+  const stages: StageId[] = ["STAGE_1", "STAGE_2", "STAGE_3"];
+  return stages.map((stageId) => {
+    const t1 = tierWorkspaces.TIER_1;
+    const t2 = tierWorkspaces.TIER_2;
+    const t3 = tierWorkspaces.TIER_3;
+
+    const s1Count = t1.stage_goals[stageId].target_paid_count;
+    const s2Count = t2.stage_goals[stageId].target_paid_count;
+    const s3Count = t3.stage_goals[stageId].target_paid_count;
+
+    const totalStudents = s1Count + s2Count + s3Count;
+    const mrr =
+      s1Count * t1.pricing_config.base_monthly_cad +
+      s2Count * t2.pricing_config.base_monthly_cad +
+      s3Count * t3.pricing_config.base_monthly_cad;
+    const quarterlyGross = mrr * 3;
+    const arr = mrr * 12;
+
+    return {
+      stageId,
+      totalStudents,
+      mrr,
+      quarterlyGross,
+      arr,
+      breakdown: {
+        tier1: {
+          students: s1Count,
+          mrr: s1Count * t1.pricing_config.base_monthly_cad,
+        },
+        tier2: {
+          students: s2Count,
+          mrr: s2Count * t2.pricing_config.base_monthly_cad,
+        },
+        tier3: {
+          students: s3Count,
+          mrr: s3Count * t3.pricing_config.base_monthly_cad,
+        },
+      },
+    };
+  });
+}
+
+export function recalculateLedgerEntryTotals(
+  entry: MonthlyTierLedgerEntry,
+  pricing: TierPricingConfig
+): MonthlyTierLedgerEntry {
+  const closingPaid = Math.max(
+    0,
+    entry.opening_paid_students +
+      entry.new_paid_students -
+      entry.churned_students
+  );
+  // Monthly subscribers paying standard monthly rate (excluding 5-mo semester pass holders who paid upfront)
+  const standardMonthlySubscribers = Math.max(
+    0,
+    closingPaid - entry.semester_pass_5mo_count
+  );
+  // Amortized monthly MRR credit from 5-mo semester pass ($165/5, $590/5, $1795/5)
+  const amortizedPassMrr =
+    entry.semester_pass_5mo_count *
+    Math.round(pricing.semester_pass_5mo_cad / 5);
+  const siblingMrr =
+    entry.sibling_addon_count * pricing.sibling_addon_monthly_cad;
+  const intensiveMrr =
+    entry.intensive_addon_count * (pricing.intensive_addon_monthly_cad || 0);
+
+  const recognizedMrr =
+    standardMonthlySubscribers * pricing.base_monthly_cad +
+    amortizedPassMrr +
+    siblingMrr +
+    intensiveMrr;
+
+  const semesterPassCash =
+    entry.semester_pass_5mo_count * pricing.semester_pass_5mo_cad;
+  const totalGrossCash =
+    standardMonthlySubscribers * pricing.base_monthly_cad +
+    semesterPassCash +
+    siblingMrr +
+    intensiveMrr;
+
+  const blendedCac =
+    entry.new_paid_students > 0
+      ? Math.round(entry.ad_spend_cad / entry.new_paid_students)
+      : 0;
+
+  return {
+    ...entry,
+    closing_paid_students: closingPaid,
+    recognized_mrr_cad: recognizedMrr,
+    semester_pass_cash_collected_cad: semesterPassCash,
+    total_gross_cash_cad: totalGrossCash,
+    blended_cac_cad: blendedCac,
+  };
+}
 
 export function getRecommendedStageForTier(
   tierId: TierId,
@@ -287,6 +451,26 @@ export function checkTierAndStageGuardrail(params: {
   const stageGoal = tierWorkspace.stage_goals[activeStage];
   const rates = computeFunnelRates(funnelMetrics);
 
+  // 0. Global Rule: Never mention "30-minute tutoring" anywhere — always 60-minute sessions (and strictly 4x60-min/mo or 8x60-min/mo in Tier 3)
+  if (
+    lower.includes("30-minute tutor") ||
+    lower.includes("30-min tutor") ||
+    lower.includes("30 min tutor") ||
+    lower.includes("30 minute tutor") ||
+    lower.includes("uncapped weekly tutor")
+  ) {
+    return {
+      detected: true,
+      violationType: "CROSS_TIER_TONE_BLEED",
+      requestedCommand: userCommand,
+      tierId: tierWorkspace.tier_id,
+      activeStage,
+      blockedReason: `Session Duration & Margin Guardrail Blocked: MindLC live tutoring sessions are strictly 60-minute sessions (4 × 60-minute sessions/month in Tier 3 base $399/mo, or 8 × 60-minute sessions/month with the +$250/mo Intensive Add-on at $649/mo). Never pitch 30-minute tutoring or uncapped weekly sessions (which cause 4.33-week calendar margin leakage).`,
+      bottleneckMathExplanation: `Product Isolation Rule: Tier 3 caps monthly delivery at 4 × 60-minute live sessions/month (or 8 × 60-minute with the +$250/mo add-on) plus a tutor-integrated monthly 15-minute parent briefing.`,
+      suggestedInScopeAlternative: `Specify 4 × 60-minute live 1:1 sessions/month ($399/mo base) or 8 × 60-minute live sessions/month ($649/mo Intensive) in Tier 3.`,
+    };
+  }
+
   // 1. Check Cross-Tier Tone Bleed FIRST
   const bleedKeyword = tierWorkspace.forbidden_cross_tier_keywords.find((kw) =>
     lower.includes(kw.toLowerCase())
@@ -509,6 +693,7 @@ export async function generateMarketingResponse(
   // CONVERSATIONAL HITL REVISION OF EXISTING PROPOSAL (Tier-Isolated)
   // =========================================================================
   if (existingProposalToRevise) {
+    const previousAssetBody = existingProposalToRevise.asset_body;
     let revisedBody = existingProposalToRevise.asset_body;
     let revisedSingleCta = existingProposalToRevise.single_cta;
     let changeSummaryPill = `Updated v${nextVersionNumber} (${tierWorkspace.tier_short_name}): Applied CMO refinement & preserved tier isolation`;
@@ -551,9 +736,12 @@ export async function generateMarketingResponse(
       tier_id: tierId,
       stage_id: stageId,
       bottleneck_stage: stageId,
+      status: "REFINING",
+      version: nextVersionNumber,
       cited_voc_quotes: citedQuotesList,
       single_cta: revisedSingleCta,
       asset_body: revisedBody,
+      previous_asset_body: previousAssetBody,
       devils_advocate: devilsAdvocate,
       revision_notes: changeSummaryPill,
     };
@@ -594,31 +782,33 @@ export async function generateMarketingResponse(
   let proposalSchema: MandatoryProposalSchema;
 
   if (tierId === "TIER_1") {
-    // TIER 1: Online Self-Coach (24/7 Socratic voice + LaTeX HUD, fully automated, NO human manager)
+    // TIER 1: Online Self-Coach ($39/mo | 5-mo Semester Pass $165 | Sibling +$19/mo)
     proposalSchema = {
       proposal_id: `PROP-T1-${stageId}-${Date.now().toString().slice(-4)}`,
       tier_id: "TIER_1",
       stage_id: stageId,
       bottleneck_stage: stageId,
+      status: "IN_REVIEW",
+      version: 1,
       title:
         stageId === "STAGE_1"
           ? `Self-Serve Diagnostic-to-Checkout Bridge & Day-7 Socratic Voice + LaTeX HUD Onboarding (${tierWorkspace.price_label})`
           : stageId === "STAGE_2"
-          ? `Ontario Unit-Test Checklist (MPM2D · MCR3U · MHF4U · SBI3U) & 50%-Off Sibling Self-Coach Loop`
+          ? `Ontario Unit-Test Checklist (MPM2D · MCR3U · MHF4U · SBI3U) & +$19/mo Sibling Self-Coach Loop`
           : `Low-CAC Course-Code Search Ad Variant (MCR3U / MHF4U Exam Prep — Target CAC ≤ $40 CAD)`,
       channel:
         stageId === "STAGE_1"
-          ? "Onboarding & Checkout UX"
+          ? "Landing Page"
           : stageId === "STAGE_2"
           ? "Community"
-          : "SEO Meta",
+          : "Social",
       target_metric: `${stageGoal.primary_kpi_name} ≥ ${stageGoal.primary_kpi_target_pct}% (Current: ${rates.completedToPaidPct}%)`,
       cited_voc_quotes: citedQuotesList,
       single_cta:
         stageId === "STAGE_1"
-          ? "Unlock Instant 24/7 Socratic Voice + LaTeX HUD Access ($39 CAD/mo Self-Serve — Cancel Anytime in 1 Click)"
+          ? "Unlock Instant 24/7 Socratic Voice + LaTeX HUD Access ($39 CAD/mo or $165 5-Mo Semester Pass — Cancel Anytime)"
           : stageId === "STAGE_2"
-          ? "Download the Free MCR3U/MHF4U Unit-Test Checklist & Share a 14-Day Self-Coach Pass With a Classmate or Sibling"
+          ? "Download the Free MCR3U/MHF4U Unit-Test Checklist & Add a Sibling Seat for +$19/mo"
           : "Start Your Free 10-Minute Automated Socratic Voice + LaTeX HUD Diagnostic Now",
       asset_body: `### Instant Post-Diagnostic Result Summary
 When your teen finishes their 10-minute diagnostic in MPM2D, MCR3U, MHF4U, or SBI3U, they immediately see their live LaTeX step trace on screen—no credit card wall required.
@@ -627,7 +817,7 @@ When your teen finishes their 10-minute diagnostic in MPM2D, MCR3U, MHF4U, or SB
 
 ### Why Self-Serve Socratic Voice + LaTeX HUD Beats Generic ChatGPT
 • Spoken Socratic Guidance + Visual LaTeX Step Board: Instead of dumping an instant answer key that causes closed-book test blanking, our voice coach asks one guiding question at a time while plotting the live equation on the LaTeX HUD.
-• Built-In Evening Study Habit: Short 15-minute unit-test warmup missions help Ontario Grade 9–12 students practice independently four nights a week (${tierWorkspace.price_label}, 100% self-serve).`,
+• Built-In Evening Study Habit &Automated Weekly Email Summary: Short 15-minute unit-test warmup missions help Ontario Grade 9–12 students practice independently four nights a week ($39/mo self-serve, $165 5-month semester pass, or +$19/mo sibling add-on).`,
       devils_advocate: {
         primary_failure_hypothesis:
           "Self-serve teenagers and parents abandon checkout if they have to create an account before seeing their personalized LaTeX HUD diagnostic result, or if Day-3 usage drops because there is no automated SMS unit-test reminder.",
@@ -643,38 +833,40 @@ When your teen finishes their 10-minute diagnostic in MPM2D, MCR3U, MHF4U, or SB
       revision_notes: `v1 Initial ${tierWorkspace.tier_short_name} (${stageId}) proposal — strictly zero human-tutor claims.`,
     };
   } else if (tierId === "TIER_2") {
-    // TIER 2: Managed Hybrid (24/7 AI Socratic Coach + Growing Success K/T/C/A Reports + Human Learning Manager)
+    // TIER 2: Managed Hybrid ($139/mo | 5-mo Semester Pass $590 | Sibling +$79/mo)
     proposalSchema = {
       proposal_id: `PROP-T2-${stageId}-${Date.now().toString().slice(-4)}`,
       tier_id: "TIER_2",
       stage_id: stageId,
       bottleneck_stage: stageId,
+      status: "IN_REVIEW",
+      version: 1,
       title:
         stageId === "STAGE_1"
-          ? `10-Min Parent Debrief Script & Growing Success (K/T/C/A) Cognitive Report Close ($139 CAD/mo)`
+          ? `10-Min Parent Debrief Script & Growing Success (K/T/C/A) Cognitive Report Close ($139/mo | $590 5-Mo Pass)`
           : stageId === "STAGE_2"
-          ? `Week 4–6 Learning Manager Parent Referral Invite & Ontario K/T/C/A Parent Info Seminar Kit`
+          ? `Week 4–6 Learning Manager Parent Referral Invite & +$79/mo Sibling Enrollment Kit`
           : `GTA Geo-Targeted (Mississauga · Oakville · Markham) Meta Ad Variant (Blended CAC ≤ $150 CAD)`,
       channel:
         stageId === "STAGE_1"
           ? "Parent Call"
           : stageId === "STAGE_2"
           ? "Community"
-          : "Facebook",
+          : "Social",
       target_metric: `${stageGoal.primary_kpi_name} ≥ ${stageGoal.primary_kpi_target_pct}% (Current: ${rates.completedToPaidPct}%)`,
       cited_voc_quotes: citedQuotesList,
       single_cta:
         stageId === "STAGE_1"
-          ? "Activate Your Teen's 30-Day Risk-Free Tier 2 Managed Hybrid Seat ($139 CAD/mo) to Lock Tomorrow's Human Learning Manager Onboarding"
+          ? "Activate Your Teen's 30-Day Risk-Free Tier 2 Managed Hybrid Seat ($139/mo or $590 5-Mo Semester Pass) to Lock Tomorrow's Human Learning Manager Onboarding"
           : stageId === "STAGE_2"
           ? "Forward Your 2 VIP 'Growing Success K/T/C/A Diagnostic Guest Passes' to 2 GTA Parent Friends"
           : "Book Your Teen's Free 20-Minute Ontario K/T/C/A Diagnostic & Learning Manager Debrief",
       asset_body: `### First 90 Seconds: Growing Success (K/T/C/A) Diagnostic Walkthrough
 > "When we looked at {{student_first_name}}'s diagnostic across Ontario's Growing Success Achievement Chart (Knowledge, Thinking, Communication, Application), we saw the exact pattern you mentioned: ${citedQuotesList[0]}. Formula recall (Knowledge) is 82%, while unassisted multi-step Thinking & Application is 44%."
 
-### Why Tier 2 Managed Hybrid ($139 CAD/mo) Solves What Self-Study & $380/mo Centres Miss
+### Why Tier 2 Managed Hybrid ($139/mo | $590 5-Mo Pass | Sibling +$79/mo) Solves What Self-Study & $380/mo Centres Miss
 • 24/7 AI Socratic Coach: Available every evening at 9:45 PM to guide your teen with step-by-step hints without ever handing over the final answer.
-• Dedicated Human Learning Manager + Monthly 15-Min Parent Briefings: Removes kitchen-table nagging by reviewing weekly Socratic logs and texting you a concise Growing Success K/T/C/A progress scorecard every Friday.
+• Dedicated Human Learning Manager + Monthly 20–30 Min Parent Briefings: Removes kitchen-table nagging by reviewing weekly Socratic logs and delivering a Growing Success K/T/C/A progress scorecard every Friday plus a monthly 20–30 minute parent briefing.
 • 30-Day Active-Habit Guarantee: 3+ Socratic sessions per week established in Month 1, or a full 100% tuition refund.`,
       devils_advocate: {
         primary_failure_hypothesis:
@@ -691,29 +883,31 @@ When your teen finishes their 10-minute diagnostic in MPM2D, MCR3U, MHF4U, or SB
       revision_notes: `v1 Initial ${tierWorkspace.tier_short_name} (${stageId}) proposal grounded in Growing Success K/T/C/A reports.`,
     };
   } else {
-    // TIER 3: Prime 1:1 Online Tutor Hybrid (1-2x/Week Live Online Educator + 24/7 AI Socratic Practice + Executive Parent Reporting)
+    // TIER 3: Prime 1:1 Online Tutor ($399/mo base = 4×60-min live sessions/mo | +$250/mo Intensive Add-on = $649/mo for 8×60-min sessions/mo | 5-mo Pass $1,795/$2,995 | Sibling +$349/mo)
     proposalSchema = {
       proposal_id: `PROP-T3-${stageId}-${Date.now().toString().slice(-4)}`,
       tier_id: "TIER_3",
       stage_id: stageId,
       bottleneck_stage: stageId,
+      status: "IN_REVIEW",
+      version: 1,
       title:
         stageId === "STAGE_1"
-          ? `1:1 Executive Parent Consultation Script & Tier 2 → Tier 3 Prime Upgrade Trigger (Flag A Overload / MHF4U · MCV4U · SBI4U)`
+          ? `1:1 Executive Parent Consultation Script & Tier 2 → Tier 3 Prime Upgrade Trigger ($399/mo Base 4×60m | $649/mo Intensive 8×60m)`
           : stageId === "STAGE_2"
           ? `Anonymized Grade 12 University-Prep Turnaround Brief & Waterloo CEMC / OUAC VIP Referral Circle Note`
           : `Grade 12 Exam-Season Waitlist Intake & Exclusive 1:1 Educator Consultation Calendar`,
       channel:
         stageId === "STAGE_1"
-          ? "1:1 Consultation & Upgrade Script"
+          ? "Consultation"
           : stageId === "STAGE_2"
-          ? "VIP Referral & Outcome Brief"
+          ? "Email"
           : "Landing Page",
       target_metric: `${stageGoal.primary_kpi_name} ≥ ${stageGoal.primary_kpi_target_pct}% (Current: ${rates.completedToPaidPct}%)`,
       cited_voc_quotes: citedQuotesList,
       single_cta:
         stageId === "STAGE_1"
-          ? "Reserve 1 of 4 Remaining Prime 1:1 Educator + Socratic AI Hybrid Seats for This Semester's OUAC Grade Transmission Window"
+          ? "Reserve 1 of 3 Remaining Prime 1:1 Educator Seats ($399/mo Base for 4×60-Min Live Sessions or $649/mo Intensive for 8×60-Min Sessions)"
           : stageId === "STAGE_2"
           ? "Request a Private VIP Introduction to Our Lead STEM Educator for a Trusted Grade 11/12 Family"
           : "Apply for Priority Placement on the Grade 12 MHF4U / MCV4U / SBI4U Prime 1:1 Educator Waitlist",
@@ -723,10 +917,10 @@ When a Grade 11/12 student in MHF4U (Advanced Functions), MCV4U (Calculus & Vect
 ### Consultative Closing Script for University-Prep Families
 > "In reviewing {{student_first_name}}'s MHF4U and MCV4U cognitive trace this week, we flagged what you noted earlier: ${citedQuotesList[0]}. When targeting 88%–93%+ top-6 averages for Engineering, Computer Science, or Business programs, Socratic AI practice works best alongside live surgical instruction."
 
-### How the Prime 1:1 Online Tutor Hybrid Works
-• 1–2 Weekly Live Online 1:1 Sessions with a Senior Ontario STEM Educator: Tailored directly to their school teacher's unit test rubric and Waterloo CEMC extension problems.
+### How the Prime 1:1 Online Tutor Hybrid Works ($399/mo Base | $649/mo Intensive)
+• 4 × 60-Minute Live 1:1 Online STEM Tutoring Sessions per Month ($399/mo Base, or $1,795 5-Mo Pass): Tailored directly to their school teacher's unit test rubric and Waterloo CEMC extension problems (strictly 4 × 60-minute sessions/month, with an optional +$250/mo Intensive Add-on at $649/mo or $2,995 5-Mo Pass for 8 × 60-minute live sessions/month).
 • 24/7 Guided Socratic AI Between Live Sessions: Reinforces what the educator taught so your teen never gets stuck on Tuesday or Thursday night homework.
-• Executive Parent Reporting & Learning Manager Oversight: Direct weekly OUAC prerequisite grade tracking.`,
+• Tutor-Integrated Monthly 15-Minute Parent Briefing: Direct monthly OUAC prerequisite grade tracking with your lead educator (no duplicate manager handoffs; Sibling add-on +$349/mo).`,
       devils_advocate: {
         primary_failure_hypothesis:
           "Affluent Grade 11/12 university-prep parents will reject Tier 3 Prime if it is pitched with mass-market discount urgency rather than scarce educator capacity and clinical OUAC prerequisite protection.",
@@ -739,7 +933,7 @@ When a Grade 11/12 student in MHF4U (Advanced Functions), MCV4U (Calculus & Vect
         pivot_action:
           "Offer Tier 2 families a '2-Week Pre-Midterm Prime 1:1 Live Educator Intensive Add-On' that seamlessly converts into full-semester Prime enrollment after the unit test.",
       },
-      revision_notes: `v1 Initial ${tierWorkspace.tier_short_name} (${stageId}) proposal — zero discount/mass-market tone bleed.`,
+      revision_notes: `v1 Initial ${tierWorkspace.tier_short_name} (${stageId}) proposal — zero discount/mass-market tone bleed, strict 4×60-min / 8×60-min session cap.`,
     };
   }
 

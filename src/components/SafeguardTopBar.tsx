@@ -2,7 +2,11 @@
 
 import React, { useEffect, useState } from "react";
 import { useMarketingStore, NavigationTab } from "@/store/useMarketingStore";
-import { computeFunnelRates } from "@/services/marketingAi";
+import {
+  computeCombined3TierBenchmarks,
+  computeFunnelRates,
+  computeStageExpectedRevenue,
+} from "@/services/marketingAi";
 import {
   StageId,
   TierId,
@@ -25,6 +29,10 @@ import {
   Compass,
   Lock,
   Unlock,
+  DollarSign,
+  FileSpreadsheet,
+  ShieldCheck,
+  TrendingUp,
 } from "lucide-react";
 
 const TIER_TAB_ITEMS: {
@@ -56,14 +64,19 @@ export function SafeguardTopBar() {
     setPaidStudentCount,
     setActiveStageOverride,
     updateTierStageGoal,
+    updateTierPricingConfig,
+    updateMonthlyLedgerEntry,
+    closeAndLockMonthlyLedgerPeriod,
     vocVault,
     realityGateStatus,
     isStageFunnelModalOpen,
     isRealityGateModalOpen,
     isVocVaultOpen,
+    isLedgerClosingModalOpen,
     setStageFunnelModalOpen,
     setRealityGateModalOpen,
     setVocVaultOpen,
+    setLedgerClosingModalOpen,
     closeAllOverlays,
     submitWeeklyRealityLog,
     activatePilotWeek0Override,
@@ -86,6 +99,13 @@ export function SafeguardTopBar() {
 
   // Stage & Funnel Modal state
   const [isEditingGoals, setIsEditingGoals] = useState(false);
+
+  // Dual-View Monthly Ledger & Closing Platform state
+  const [closingDualViewTab, setClosingDualViewTab] = useState<
+    "finance_ledger" | "cmo_closing_audit"
+  >("finance_ledger");
+  const [selectedPeriodMonth, setSelectedPeriodMonth] =
+    useState<string>("2026-11");
 
   // Reality Gate Form state
   const [weekStartDate, setWeekStartDate] = useState(
@@ -244,6 +264,38 @@ export function SafeguardTopBar() {
   ];
   const weakestRateObj = [...stepRates].sort((a, b) => a.rate - b.rate)[0];
 
+  // Dynamically computed Combined 3-Tier Benchmarks (Section 1.2)
+  const combinedBenchmarks = computeCombined3TierBenchmarks(tierWorkspaces);
+
+  // Active Ledger Entries across all 3 Tiers for the selected month
+  const activeTierLedgerEntry =
+    activeTier.monthly_ledger.find(
+      (e) => e.period_month === selectedPeriodMonth
+    ) || activeTier.monthly_ledger[activeTier.monthly_ledger.length - 1];
+
+  const allThreeTierEntriesForMonth = (
+    ["TIER_1", "TIER_2", "TIER_3"] as TierId[]
+  ).map((tid) => {
+    const ws = tierWorkspaces[tid];
+    const entry =
+      ws.monthly_ledger.find((e) => e.period_month === selectedPeriodMonth) ||
+      ws.monthly_ledger[ws.monthly_ledger.length - 1];
+    return { ws, entry };
+  });
+
+  const combinedMonthActualMrr = allThreeTierEntriesForMonth.reduce(
+    (sum, item) => sum + (item.entry?.recognized_mrr_cad || 0),
+    0
+  );
+  const combinedMonthActualGrossCash = allThreeTierEntriesForMonth.reduce(
+    (sum, item) => sum + (item.entry?.total_gross_cash_cad || 0),
+    0
+  );
+  const combinedMonthActualStudents = allThreeTierEntriesForMonth.reduce(
+    (sum, item) => sum + (item.entry?.closing_paid_students || 0),
+    0
+  );
+
   return (
     <>
       {/* ===================================================================== */}
@@ -310,13 +362,13 @@ export function SafeguardTopBar() {
           </nav>
         </div>
 
-        {/* RIGHT SIDE: 3 Compact On-Demand Trigger Buttons (Click to Reveal) */}
+        {/* RIGHT SIDE: Compact On-Demand Trigger Buttons (Click to Reveal) */}
         <div className="flex items-center gap-2">
           {/* 1. [🎯 Stage X · Goals] */}
           <button
             onClick={() => setStageFunnelModalOpen(true)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 transition-colors shadow-2xs"
-            title="View & Edit Stage 1/2/3 Roadmap and 4-Step Mini-Funnel"
+            title="View & Edit Stage 1/2/3 Revenue Targets, Pricing, and 4-Step Mini-Funnel"
           >
             <Target className="w-3.5 h-3.5 text-indigo-600" />
             <span className="font-semibold text-slate-800">
@@ -359,6 +411,16 @@ export function SafeguardTopBar() {
             </span>
           </button>
 
+          {/* 4. [📊 Ledger & Closing] (Finance-Ready Monthly Ledger & Dual-View Closing Platform) */}
+          <button
+            onClick={() => setLedgerClosingModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 transition-colors shadow-2xs"
+            title="Open Finance-Ready Monthly Ledger & Dual-View Period Closing Platform"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+            <span className="hidden lg:inline">Ledger &amp; Closing</span>
+          </button>
+
           {/* Secondary More Views Popover Button */}
           <div className="relative">
             <button
@@ -374,7 +436,7 @@ export function SafeguardTopBar() {
             </button>
 
             {showUtilityMenu && (
-              <div className="absolute right-0 mt-2 w-52 bg-white rounded-xl shadow-lg border border-slate-200 py-1.5 z-50">
+              <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-lg border border-slate-200 py-1.5 z-50">
                 <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                   Workspace Views
                 </div>
@@ -405,6 +467,16 @@ export function SafeguardTopBar() {
                     )}
                   </button>
                 ))}
+                <div className="my-1 border-t border-slate-100" />
+                <button
+                  onClick={() => {
+                    setShowUtilityMenu(false);
+                    setLedgerClosingModalOpen(true);
+                  }}
+                  className="w-full text-left px-3 py-1.5 text-xs text-emerald-700 hover:bg-emerald-50 font-medium flex items-center justify-between"
+                >
+                  <span>📊 Monthly Ledger &amp; Dual Closing</span>
+                </button>
               </div>
             )}
           </div>
@@ -413,6 +485,8 @@ export function SafeguardTopBar() {
 
       {/* ===================================================================== */}
       {/* 2. ON-DEMAND MODAL A: STAGE & FUNNEL MODAL (`[🎯 Stage X · Goals]`)   */}
+      {/*    Includes Editable Unit Pricing, Dynamic MRR / Q / ARR,             */}
+      {/*    Combined 3-Tier Benchmark Summary, and 4-Step Mini-Funnel          */}
       {/* ===================================================================== */}
       {isStageFunnelModalOpen && (
         <div
@@ -420,22 +494,23 @@ export function SafeguardTopBar() {
           onClick={() => setStageFunnelModalOpen(false)}
         >
           <div
-            className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-5xl w-full overflow-hidden my-8"
+            className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-6xl w-full overflow-hidden my-8"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/70">
+            <div className="px-6 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 bg-slate-50/70">
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
                     {activeTier.tier_name}
                   </span>
-                  <span className="text-xs text-slate-500 font-mono">
+                  <span className="text-xs text-slate-600 font-mono">
                     {activeTier.price_label}
                   </span>
                 </div>
                 <h2 className="text-base font-semibold text-slate-900 mt-1">
-                  3-Stage Growth Roadmap &amp; Conversion Funnel Telemetry
+                  3-Stage Revenue Targets (CAD), Unit Pricing &amp; Conversion
+                  Funnel
                 </h2>
               </div>
 
@@ -457,7 +532,7 @@ export function SafeguardTopBar() {
                   />
                 </div>
 
-                {/* Edit Goals Toggle */}
+                {/* Edit Goals & Pricing Toggle */}
                 <button
                   onClick={() => setIsEditingGoals((prev) => !prev)}
                   className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
@@ -467,7 +542,11 @@ export function SafeguardTopBar() {
                   }`}
                 >
                   <Edit3 className="w-3.5 h-3.5" />
-                  <span>{isEditingGoals ? "Done Editing" : "Edit Goals"}</span>
+                  <span>
+                    {isEditingGoals
+                      ? "Done Editing"
+                      : "Edit Pricing & Stage Goals"}
+                  </span>
                 </button>
 
                 <button
@@ -479,12 +558,135 @@ export function SafeguardTopBar() {
               </div>
             </div>
 
-            <div className="p-6 space-y-6 max-h-[82vh] overflow-y-auto">
-              {/* 3-STAGE ROADMAP (3 Horizontal Cards for Stage 1, Stage 2, Stage 3) */}
+            <div className="p-6 space-y-6 max-h-[84vh] overflow-y-auto">
+              {/* EDITABLE UNIT PRICING BAR FOR ACTIVE TIER (Section 1.1) */}
+              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 flex flex-wrap items-center justify-between gap-4">
+                <div className="space-y-0.5">
+                  <div className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
+                    <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>
+                      {activeTier.tier_name} · Unit Pricing Configuration (CAD)
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    {activeTier.offer_summary}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3 text-xs">
+                  <div className="bg-white px-3 py-1.5 rounded-lg border border-slate-200 flex items-center gap-2">
+                    <span className="text-slate-500">Base /mo:</span>
+                    {isEditingGoals ? (
+                      <input
+                        type="number"
+                        min={1}
+                        value={activeTier.pricing_config.base_monthly_cad}
+                        onChange={(e) =>
+                          updateTierPricingConfig(activeTierId, {
+                            base_monthly_cad:
+                              parseInt(e.target.value || "1", 10) || 1,
+                          })
+                        }
+                        className="w-16 font-mono font-semibold text-slate-900 border border-slate-300 rounded px-1.5 py-0.5"
+                      />
+                    ) : (
+                      <strong className="font-mono text-slate-900">
+                        ${activeTier.pricing_config.base_monthly_cad} CAD
+                      </strong>
+                    )}
+                  </div>
+
+                  <div className="bg-white px-3 py-1.5 rounded-lg border border-slate-200 flex items-center gap-2">
+                    <span className="text-slate-500">5-Mo Pass:</span>
+                    {isEditingGoals ? (
+                      <input
+                        type="number"
+                        min={1}
+                        value={activeTier.pricing_config.semester_pass_5mo_cad}
+                        onChange={(e) =>
+                          updateTierPricingConfig(activeTierId, {
+                            semester_pass_5mo_cad:
+                              parseInt(e.target.value || "1", 10) || 1,
+                          })
+                        }
+                        className="w-20 font-mono font-semibold text-slate-900 border border-slate-300 rounded px-1.5 py-0.5"
+                      />
+                    ) : (
+                      <strong className="font-mono text-slate-900">
+                        ${activeTier.pricing_config.semester_pass_5mo_cad} CAD
+                      </strong>
+                    )}
+                  </div>
+
+                  <div className="bg-white px-3 py-1.5 rounded-lg border border-slate-200 flex items-center gap-2">
+                    <span className="text-slate-500">Sibling +/mo:</span>
+                    {isEditingGoals ? (
+                      <input
+                        type="number"
+                        min={0}
+                        value={
+                          activeTier.pricing_config.sibling_addon_monthly_cad
+                        }
+                        onChange={(e) =>
+                          updateTierPricingConfig(activeTierId, {
+                            sibling_addon_monthly_cad:
+                              parseInt(e.target.value || "0", 10) || 0,
+                          })
+                        }
+                        className="w-16 font-mono font-semibold text-slate-900 border border-slate-300 rounded px-1.5 py-0.5"
+                      />
+                    ) : (
+                      <strong className="font-mono text-slate-900">
+                        +${activeTier.pricing_config.sibling_addon_monthly_cad}{" "}
+                        CAD
+                      </strong>
+                    )}
+                  </div>
+
+                  {activeTierId === "TIER_3" && (
+                    <div className="bg-indigo-50 px-3 py-1.5 rounded-lg border border-indigo-200 flex items-center gap-2">
+                      <span className="text-indigo-800">
+                        Intensive 8×60m Add-on:
+                      </span>
+                      {isEditingGoals ? (
+                        <input
+                          type="number"
+                          min={0}
+                          value={
+                            activeTier.pricing_config
+                              .intensive_addon_monthly_cad || 250
+                          }
+                          onChange={(e) =>
+                            updateTierPricingConfig("TIER_3", {
+                              intensive_addon_monthly_cad:
+                                parseInt(e.target.value || "0", 10) || 0,
+                            })
+                          }
+                          className="w-16 font-mono font-semibold text-indigo-900 border border-indigo-300 rounded px-1.5 py-0.5 bg-white"
+                        />
+                      ) : (
+                        <strong className="font-mono text-indigo-900">
+                          +$
+                          {activeTier.pricing_config
+                            .intensive_addon_monthly_cad || 250}
+                          /mo ($
+                          {activeTier.pricing_config.base_monthly_cad +
+                            (activeTier.pricing_config
+                              .intensive_addon_monthly_cad || 250)}
+                          /mo)
+                        </strong>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 3-STAGE ROADMAP WITH DYNAMICALLY COMPUTED MRR, QUARTERLY (MRR×3), AND ARR (MRR×12) */}
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                    Stage 1 / 2 / 3 Strategic Guardrails ({activeTier.tier_name})
+                    Stage 1 / 2 / 3 Strategic Guardrails &amp; Expected Gross
+                    Revenue ({activeTier.tier_name})
                   </span>
                   <span className="text-xs text-slate-500">
                     Click any stage card to set it as the active stage filter
@@ -495,6 +697,11 @@ export function SafeguardTopBar() {
                   {STAGE_ORDER.map((stageId, idx) => {
                     const goal = activeTier.stage_goals[stageId];
                     const isActiveStage = activeTier.active_stage === stageId;
+                    const rev = computeStageExpectedRevenue({
+                      targetPaidCount: goal.target_paid_count,
+                      baseMonthlyCad:
+                        activeTier.pricing_config.base_monthly_cad,
+                    });
 
                     return (
                       <div
@@ -519,8 +726,8 @@ export function SafeguardTopBar() {
                                   : "bg-slate-100 text-slate-700"
                               }`}
                             >
-                              Stage {idx + 1} · {goal.min_paid}–{goal.max_paid}{" "}
-                              paid
+                              Stage {idx + 1} · {goal.min_paid}–
+                              {goal.target_paid_count} paid
                             </span>
                             {isActiveStage && (
                               <span className="text-[11px] font-semibold text-indigo-700 flex items-center gap-1">
@@ -539,6 +746,27 @@ export function SafeguardTopBar() {
                             </p>
                           </div>
 
+                          {/* Dynamic Expected Gross Revenue Pill (MRR · Quarterly · ARR) */}
+                          <div className="rounded-lg bg-emerald-50/80 border border-emerald-200 p-2.5 flex items-center justify-between">
+                            <div>
+                              <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700">
+                                Expected Stage Gross Revenue
+                              </div>
+                              <div className="text-xs font-mono font-bold text-emerald-950 mt-0.5">
+                                ${rev.expectedMrr.toLocaleString()}/mo · $
+                                {rev.expectedQuarterlyGross.toLocaleString()}/Q
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-[10px] font-mono text-emerald-700">
+                                ARR (MRR×12)
+                              </div>
+                              <div className="text-xs font-mono font-semibold text-emerald-900">
+                                ${rev.expectedArr.toLocaleString()}
+                              </div>
+                            </div>
+                          </div>
+
                           {isEditingGoals ? (
                             <div
                               className="space-y-2 pt-2 border-t border-slate-200/80"
@@ -546,7 +774,7 @@ export function SafeguardTopBar() {
                             >
                               <div>
                                 <label className="block text-[10px] font-semibold uppercase text-slate-500">
-                                  Milestone Student Cap
+                                  Stage Target Paid Students
                                 </label>
                                 <input
                                   type="number"
@@ -554,6 +782,9 @@ export function SafeguardTopBar() {
                                   onChange={(e) =>
                                     updateTierStageGoal(activeTierId, stageId, {
                                       target_paid_count:
+                                        parseInt(e.target.value || "1", 10) ||
+                                        1,
+                                      max_paid:
                                         parseInt(e.target.value || "1", 10) ||
                                         1,
                                     })
@@ -652,7 +883,52 @@ export function SafeguardTopBar() {
                 </div>
               </div>
 
-              {/* 4-STEP MINI-FUNNEL FOR THIS TIER (Directly beneath the 3 Stage Cards) */}
+              {/* SECTION 1.2: COMBINED 3-TIER BENCHMARK SUMMARY (Dynamically Computed) */}
+              <div className="rounded-xl border border-slate-200 bg-slate-900 text-white p-5">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-3.5">
+                  <div className="flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4 text-emerald-400" />
+                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-300">
+                      Combined 3-Tier Benchmark Summary (Dynamic CAD Rollup)
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-slate-400 font-mono">
+                    Auto-recalculates from Tier 1 ($
+                    {tierWorkspaces.TIER_1.pricing_config.base_monthly_cad}) +
+                    Tier 2 ($
+                    {tierWorkspaces.TIER_2.pricing_config.base_monthly_cad}) +
+                    Tier 3 ($
+                    {tierWorkspaces.TIER_3.pricing_config.base_monthly_cad} base)
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+                  {combinedBenchmarks.map((b, idx) => (
+                    <div
+                      key={b.stageId}
+                      className="rounded-xl bg-slate-800/90 border border-slate-700 p-4 space-y-2"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-emerald-400">
+                          All Stage {idx + 1} ({b.totalStudents} students)
+                        </span>
+                        <span className="text-[11px] font-mono text-slate-400">
+                          {b.breakdown.tier1.students} T1 +{" "}
+                          {b.breakdown.tier2.students} T2 +{" "}
+                          {b.breakdown.tier3.students} T3
+                        </span>
+                      </div>
+                      <div className="text-sm font-mono font-bold text-white">
+                        ${b.mrr.toLocaleString()}/mo MRR · $
+                        {b.quarterlyGross.toLocaleString()}/Q · $
+                        {b.arr.toLocaleString()} ARR
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* 4-STEP MINI-FUNNEL FOR THIS TIER (Directly beneath the Stage Cards) */}
               <div className="bg-slate-50 rounded-xl border border-slate-200 p-5">
                 <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
                   <div>
@@ -1017,7 +1293,7 @@ export function SafeguardTopBar() {
                   type="text"
                   value={topWinningTouchpoint}
                   onChange={(e) => setTopWinningTouchpoint(e.target.value)}
-                  placeholder="e.g., 15-min post-diagnostic parent debrief call showing K/T/C/A rubric gaps"
+                  placeholder="e.g., 10-min post-diagnostic parent debrief call showing K/T/C/A rubric gaps"
                   className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-800"
                 />
               </div>
@@ -1039,7 +1315,7 @@ export function SafeguardTopBar() {
                     onClick={activatePilotWeek0Override}
                     className="px-3 py-2 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-100 border border-slate-200"
                   >
-                    Load Sample Baseline (Week 0)
+                    Pilot Week 0 Bootstrap Override
                   </button>
                   <button
                     type="submit"
@@ -1055,7 +1331,452 @@ export function SafeguardTopBar() {
       )}
 
       {/* ===================================================================== */}
-      {/* 4. ON-DEMAND DRAWER C: VoC VAULT RIGHT SLIDE-OVER (`[💬 VoC Vault]`)  */}
+      {/* 4. ON-DEMAND MODAL C: FINANCE-READY MONTHLY LEDGER & DUAL-VIEW CLOSING */}
+      {/* ===================================================================== */}
+      {isLedgerClosingModalOpen && activeTierLedgerEntry && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-[1px] flex items-center justify-center p-4 overflow-y-auto"
+          onClick={() => setLedgerClosingModalOpen(false)}
+        >
+          <div
+            className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-6xl w-full overflow-hidden my-8"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header with Dual-View Switcher (Finance Ledger vs Executive CMO Closing Audit) */}
+            <div className="px-6 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 bg-slate-50">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    Finance-Ready Monthly Ledger &amp; Dual-View Closing
+                  </span>
+                  <select
+                    value={selectedPeriodMonth}
+                    onChange={(e) => setSelectedPeriodMonth(e.target.value)}
+                    className="text-xs font-mono font-semibold border border-slate-300 rounded-lg px-2.5 py-1 bg-white text-slate-800"
+                  >
+                    <option value="2026-11">
+                      2026-11 · November 2026 (Current)
+                    </option>
+                    <option value="2026-10">
+                      2026-10 · October 2026 (Closed)
+                    </option>
+                  </select>
+                </div>
+                <h2 className="text-base font-semibold text-slate-900 mt-1">
+                  3-Tier CAD Revenue Reconciliation &amp; CMO Stage Closing
+                  Platform
+                </h2>
+              </div>
+
+              <div className="flex items-center gap-3">
+                {/* Dual-View Segmented Toggle */}
+                <div className="inline-flex bg-slate-200/80 p-1 rounded-xl border border-slate-200">
+                  <button
+                    onClick={() => setClosingDualViewTab("finance_ledger")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      closingDualViewTab === "finance_ledger"
+                        ? "bg-white text-slate-900 shadow-2xs font-semibold"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    1. Finance Monthly Ledger (CAD)
+                  </button>
+                  <button
+                    onClick={() => setClosingDualViewTab("cmo_closing_audit")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      closingDualViewTab === "cmo_closing_audit"
+                        ? "bg-white text-slate-900 shadow-2xs font-semibold"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    2. Executive CMO Closing Brief
+                  </button>
+                </div>
+
+                <button
+                  onClick={() => setLedgerClosingModalOpen(false)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-6 max-h-[82vh] overflow-y-auto">
+              {/* Top Rollup Bar Across All 3 Tiers for Selected Period */}
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3.5">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="text-[11px] font-semibold uppercase text-slate-400">
+                    Combined Paid Students ({selectedPeriodMonth})
+                  </div>
+                  <div className="text-xl font-bold font-mono text-slate-900 mt-1">
+                    {combinedMonthActualStudents} active
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                     vs. 80 All-Stage-1 Benchmark
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4">
+                  <div className="text-[11px] font-semibold uppercase text-emerald-700">
+                    Recognized Monthly MRR (CAD)
+                  </div>
+                  <div className="text-xl font-bold font-mono text-emerald-950 mt-1">
+                    ${combinedMonthActualMrr.toLocaleString()}/mo
+                  </div>
+                  <div className="text-[11px] text-emerald-700 mt-0.5">
+                    Includes amortized 5-mo passes &amp; add-ons
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-4">
+                  <div className="text-[11px] font-semibold uppercase text-indigo-700">
+                    Gross Cash Collected (CAD)
+                  </div>
+                  <div className="text-xl font-bold font-mono text-indigo-950 mt-1">
+                    ${combinedMonthActualGrossCash.toLocaleString()} CAD
+                  </div>
+                  <div className="text-[11px] text-indigo-700 mt-0.5">
+                    Annualized Run-Rate: $
+                    {(combinedMonthActualMrr * 12).toLocaleString()} ARR
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="text-[11px] font-semibold uppercase text-slate-400">
+                    Stage 1 Combined Benchmark
+                  </div>
+                  <div className="text-xl font-bold font-mono text-slate-900 mt-1">
+                    ${combinedBenchmarks[0].mrr.toLocaleString()}/mo
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                    $
+                    {combinedBenchmarks[0].quarterlyGross.toLocaleString()}/Q ·
+                    ${combinedBenchmarks[0].arr.toLocaleString()} ARR
+                  </div>
+                </div>
+              </div>
+
+              {closingDualViewTab === "finance_ledger" ? (
+                /* VIEW 1: FINANCE-READY 3-TIER MONTHLY LEDGER TABLE */
+                <div className="space-y-4">
+                  <div className="overflow-x-auto rounded-xl border border-slate-200">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-100 text-slate-600 border-b border-slate-200 font-semibold">
+                          <th className="py-3 px-4">Product Tier</th>
+                          <th className="py-3 px-3 text-center">Status</th>
+                          <th className="py-3 px-3 text-center">
+                            Opening / +New / -Churn
+                          </th>
+                          <th className="py-3 px-3 text-center">
+                            Closing Paid
+                          </th>
+                          <th className="py-3 px-3 text-center">
+                            5-Mo Passes
+                          </th>
+                          <th className="py-3 px-3 text-center">
+                            Sibling Add-ons
+                          </th>
+                          <th className="py-3 px-3 text-center">
+                            T3 Intensive (+$250)
+                          </th>
+                          <th className="py-3 px-3 text-right">
+                            Recognized MRR
+                          </th>
+                          <th className="py-3 px-3 text-right">
+                            Gross Cash (CAD)
+                          </th>
+                          <th className="py-3 px-3 text-center">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200">
+                        {allThreeTierEntriesForMonth.map(({ ws, entry }) => {
+                          const isLocked =
+                            entry.status === "CLOSED_AND_LOCKED";
+                          return (
+                            <tr
+                              key={ws.tier_id}
+                              className="hover:bg-slate-50/80"
+                            >
+                              <td className="py-3.5 px-4">
+                                <div className="font-semibold text-slate-900">
+                                  {ws.tier_name}
+                                </div>
+                                <div className="text-[11px] text-slate-500 font-mono">
+                                  {ws.price_label}
+                                </div>
+                              </td>
+                              <td className="py-3.5 px-3 text-center">
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                                    isLocked
+                                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                      : "bg-amber-50 text-amber-800 border border-amber-200"
+                                  }`}
+                                >
+                                  {isLocked ? "LOCKED" : entry.status}
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-3 text-center font-mono">
+                                <div className="inline-flex items-center gap-1">
+                                  <span>{entry.opening_paid_students}</span>
+                                  <span className="text-slate-400">+</span>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    disabled={isLocked}
+                                    value={entry.new_paid_students}
+                                    onChange={(e) =>
+                                      updateMonthlyLedgerEntry(
+                                        ws.tier_id,
+                                        entry.id,
+                                        {
+                                          new_paid_students:
+                                            parseInt(
+                                              e.target.value || "0",
+                                              10
+                                            ) || 0,
+                                        }
+                                      )
+                                    }
+                                    className="w-11 text-center border border-slate-300 rounded py-0.5 bg-white disabled:bg-slate-100"
+                                    title="New paid students this month"
+                                  />
+                                  <span className="text-slate-400">-</span>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    disabled={isLocked}
+                                    value={entry.churned_students}
+                                    onChange={(e) =>
+                                      updateMonthlyLedgerEntry(
+                                        ws.tier_id,
+                                        entry.id,
+                                        {
+                                          churned_students:
+                                            parseInt(
+                                              e.target.value || "0",
+                                              10
+                                            ) || 0,
+                                        }
+                                      )
+                                    }
+                                    className="w-11 text-center border border-slate-300 rounded py-0.5 bg-white disabled:bg-slate-100"
+                                    title="Churned students this month"
+                                  />
+                                </div>
+                              </td>
+                              <td className="py-3.5 px-3 text-center font-mono font-bold text-slate-900">
+                                {entry.closing_paid_students}
+                              </td>
+                              <td className="py-3.5 px-3 text-center font-mono">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  disabled={isLocked}
+                                  value={entry.semester_pass_5mo_count}
+                                  onChange={(e) =>
+                                    updateMonthlyLedgerEntry(
+                                      ws.tier_id,
+                                      entry.id,
+                                      {
+                                        semester_pass_5mo_count:
+                                          parseInt(e.target.value || "0", 10) ||
+                                          0,
+                                      }
+                                    )
+                                  }
+                                  className="w-12 text-center border border-slate-300 rounded py-0.5 bg-white disabled:bg-slate-100"
+                                />
+                              </td>
+                              <td className="py-3.5 px-3 text-center font-mono">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  disabled={isLocked}
+                                  value={entry.sibling_addon_count}
+                                  onChange={(e) =>
+                                    updateMonthlyLedgerEntry(
+                                      ws.tier_id,
+                                      entry.id,
+                                      {
+                                        sibling_addon_count:
+                                          parseInt(e.target.value || "0", 10) ||
+                                          0,
+                                      }
+                                    )
+                                  }
+                                  className="w-12 text-center border border-slate-300 rounded py-0.5 bg-white disabled:bg-slate-100"
+                                />
+                              </td>
+                              <td className="py-3.5 px-3 text-center font-mono">
+                                {ws.tier_id === "TIER_3" ? (
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    disabled={isLocked}
+                                    value={entry.intensive_addon_count}
+                                    onChange={(e) =>
+                                      updateMonthlyLedgerEntry(
+                                        ws.tier_id,
+                                        entry.id,
+                                        {
+                                          intensive_addon_count:
+                                            parseInt(
+                                              e.target.value || "0",
+                                              10
+                                            ) || 0,
+                                        }
+                                      )
+                                    }
+                                    className="w-12 text-center border border-indigo-300 rounded py-0.5 bg-indigo-50/50 disabled:bg-slate-100"
+                                  />
+                                ) : (
+                                  <span className="text-slate-300">—</span>
+                                )}
+                              </td>
+                              <td className="py-3.5 px-3 text-right font-mono font-bold text-emerald-800">
+                                ${entry.recognized_mrr_cad.toLocaleString()}/mo
+                              </td>
+                              <td className="py-3.5 px-3 text-right font-mono font-semibold text-slate-900">
+                                ${entry.total_gross_cash_cad.toLocaleString()}
+                              </td>
+                              <td className="py-3.5 px-3 text-center">
+                                <button
+                                  onClick={() =>
+                                    closeAndLockMonthlyLedgerPeriod(
+                                      ws.tier_id,
+                                      entry.id,
+                                      isLocked ? "OPEN" : "CLOSED_AND_LOCKED"
+                                    )
+                                  }
+                                  className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
+                                    isLocked
+                                      ? "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                      : "bg-emerald-600 text-white hover:bg-emerald-700"
+                                  }`}
+                                >
+                                  {isLocked ? "Re-open" : "Close & Lock"}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Tier 3 4x60-min Margin Safeguard Note */}
+                  <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-4 flex items-start gap-3 text-xs text-slate-700">
+                    <ShieldCheck className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="text-slate-900">
+                        Tier 3 Margin Protection Audit (4 × 60-Min Cap vs.
+                        4.33-Week Calendar Leakage):{" "}
+                      </strong>
+                      Base Tier 3 ($399/mo) is strictly capped at{" "}
+                      <strong>4 × 60-minute live sessions/month</strong> + a
+                      tutor-integrated monthly 15-minute parent briefing.
+                      Families requesting twice-weekly live sessions attach the{" "}
+                      <strong>+$250/mo Intensive Add-on ($649/mo total)</strong>{" "}
+                      for <strong>8 × 60-minute live sessions/month</strong>.
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* VIEW 2: EXECUTIVE CMO CLOSING BRIEF (Dual-View Audit) */
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {allThreeTierEntriesForMonth.map(({ ws, entry }) => {
+                    const stageGoal = ws.stage_goals[entry.active_stage];
+                    const stageRev = computeStageExpectedRevenue({
+                      targetPaidCount: stageGoal.target_paid_count,
+                      baseMonthlyCad: ws.pricing_config.base_monthly_cad,
+                    });
+                    const mrrProgressPct =
+                      stageRev.expectedMrr > 0
+                        ? Math.min(
+                            100,
+                            Math.round(
+                              (entry.recognized_mrr_cad /
+                                stageRev.expectedMrr) *
+                                100
+                            )
+                          )
+                        : 0;
+
+                    return (
+                      <div
+                        key={ws.tier_id}
+                        className="rounded-xl border border-slate-200 bg-white p-5 space-y-3.5 shadow-2xs flex flex-col justify-between"
+                      >
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                              {ws.tier_short_name} · {entry.active_stage}
+                            </span>
+                            <span className="text-xs font-mono font-bold text-emerald-700">
+                              ${entry.recognized_mrr_cad.toLocaleString()} / $
+                              {stageRev.expectedMrr.toLocaleString()} MRR (
+                              {mrrProgressPct}%)
+                            </span>
+                          </div>
+
+                          <div>
+                            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                              Finance Reconciliation Note
+                            </div>
+                            <p className="text-xs text-slate-700 mt-1 leading-relaxed">
+                              {entry.finance_reconciliation_note}
+                            </p>
+                          </div>
+
+                          <div className="pt-2 border-t border-slate-100">
+                            <div className="text-[10px] font-semibold uppercase tracking-wider text-indigo-600">
+                              AI Agent CMO Closing Audit
+                            </div>
+                            <p className="text-xs text-slate-800 mt-1 leading-relaxed">
+                              {entry.cmo_closing_audit_summary}
+                            </p>
+                          </div>
+
+                          <div className="p-3 rounded-lg bg-slate-50 border border-slate-200/80">
+                            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                              Next Period Stage Recommendation
+                            </div>
+                            <p className="text-xs font-medium text-slate-900 mt-0.5">
+                              {entry.next_month_stage_recommendation}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+                          <span>
+                            Closing Students:{" "}
+                            <strong className="text-slate-900">
+                              {entry.closing_paid_students}/
+                              {stageGoal.target_paid_count}
+                            </strong>
+                          </span>
+                          <span>
+                            Status:{" "}
+                            <strong className="text-slate-800">
+                              {entry.status}
+                            </strong>
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* 5. ON-DEMAND DRAWER D: VoC VAULT RIGHT SLIDE-OVER (`[💬 VoC Vault]`)  */}
       {/* ===================================================================== */}
       {isVocVaultOpen && (
         <div

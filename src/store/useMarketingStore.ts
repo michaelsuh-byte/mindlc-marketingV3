@@ -13,13 +13,16 @@ import {
   HITLProposalState,
   MarketingAgent,
   MarketingSkill,
+  MonthlyTierLedgerEntry,
   OntarioTrendSignal,
+  PeriodClosingStatus,
   PlanHorizon,
   PlannedActivity,
   PlanQaExchange,
   RealityGateStatus,
   StageId,
   TierId,
+  TierPricingConfig,
   TierWorkspaceState,
   UserRecord,
   VerbatimParentQuote,
@@ -30,11 +33,14 @@ import {
 import {
   checkTierAndStageGuardrail,
   computeFunnelRates,
+  DEFAULT_TIER_PRICING,
   DEFAULT_TIER_STAGE_GOALS,
   evaluateCmoPlanQuestionAndAdjust,
   executeAutonomousAgentTask,
+  formatTierPriceSummary,
   generateMarketingResponse,
   getRecommendedStageForTier,
+  recalculateLedgerEntryTotals,
 } from "@/services/marketingAi";
 
 export type NavigationTab =
@@ -78,6 +84,7 @@ interface MarketingState {
   isRealityGateModalOpen: boolean;
   isVocVaultOpen: boolean;
   isAiDrawerOpen: boolean;
+  isLedgerClosingModalOpen: boolean;
   inspectedRiskProposalIds: Record<string, boolean>;
 
   isSampleSeedActive: boolean;
@@ -96,7 +103,7 @@ interface MarketingState {
   isRunningTeamSprint: boolean;
   isAskingPlannerQa: boolean;
 
-  // Tier & Stage Switching / Editing Actions
+  // Tier & Stage Switching / Editing / Pricing & Ledger Actions
   setActiveTierId: (tierId: TierId) => void;
   setPaidStudentCount: (count: number) => void;
   setActiveStageOverride: (stageId: StageId) => void;
@@ -105,12 +112,27 @@ interface MarketingState {
     stageId: StageId,
     partialGoal: Partial<EditableStageGoal>
   ) => void;
+  updateTierPricingConfig: (
+    tierId: TierId,
+    partialPricing: Partial<TierPricingConfig>
+  ) => void;
+  updateMonthlyLedgerEntry: (
+    tierId: TierId,
+    entryId: string,
+    partialEntry: Partial<MonthlyTierLedgerEntry>
+  ) => void;
+  closeAndLockMonthlyLedgerPeriod: (
+    tierId: TierId,
+    entryId: string,
+    nextStatus: PeriodClosingStatus
+  ) => void;
 
   // On-Demand Modal & Drawer Toggles
   setStageFunnelModalOpen: (open: boolean) => void;
   setRealityGateModalOpen: (open: boolean) => void;
   setVocVaultOpen: (open: boolean) => void;
   setAiDrawerOpen: (open: boolean) => void;
+  setLedgerClosingModalOpen: (open: boolean) => void;
   markProposalRiskInspected: (proposalId: string) => void;
   closeAllOverlays: () => void;
 
@@ -802,7 +824,7 @@ On our 10-minute call, I'll screen-share the exact step where {{student_first_na
 ];
 
 // ============================================================================
-// TIER 3 PROPOSALS (Prime 1:1 Online Tutor Hybrid — 2/5 Paid)
+// TIER 3 PROPOSALS (Prime 1:1 Online Tutor Hybrid — 2/5 Paid · $399/mo Base 4×60m | +$250/mo Intensive $649/mo 8×60m)
 // ============================================================================
 const TIER_3_PROPOSALS: Asset[] = [
   {
@@ -811,9 +833,9 @@ const TIER_3_PROPOSALS: Asset[] = [
     stage_id: "STAGE_1",
     campaign_id: "camp-ontario-fall",
     platform: "1:1 Consultation & Upgrade Script",
-    channel_badge: "1:1 Consult",
+    channel_badge: "Consultation",
     title:
-      "Flag A Overload Tier 2 → Tier 3 Prime Upgrade Script & Grade 12 MHF4U/MCV4U/SBI4U Syllabus Roadmap",
+      "Flag A Overload Tier 2 → Tier 3 Prime Consultation Script ($399/mo Base 4×60m | $649/mo Intensive 8×60m)",
     detail_level_used: 3,
     skill_used: "copywriting",
     updated_at: "15 mins ago",
@@ -828,19 +850,16 @@ const TIER_3_PROPOSALS: Asset[] = [
     versions: [
       {
         version: 1,
-        content: `## [Tier 3 · Prime 1:1 Online Tutor Hybrid ($349 CAD/mo) — Flag A Overload Consultation Script]
-**Target Family:** Grade 11/12 university-prep parents targeting Waterloo Engineering/CEMC, U of T CS, McMaster Health Sci, or Ivey/Rotman Business.
+        content: `### 1. The Flag A Overload Trigger (Why Tier 2 Families Upgrade to Tier 3 Prime)
+> "During {{student_first_name}}'s MHF4U/MCV4U Socratic AI sessions this week, our system triggered a Flag A Cognitive Overload on multi-step trigonometric proofs and optimization problems. As you shared with us: 'For Waterloo Engineering and U of T Computer Science, she needs at least a 92% in MHF4U and MCV4U—we need a real Ontario specialist tutor 1-on-1 every week on top of the 24/7 Socratic AI.'"
 
-### 1. The "Flag A Overload" Trigger (Why Tier 2 Families Upgrade to Tier 3 Prime)
-> *"During {{student_first_name}}'s MHF4U/MCV4U Socratic AI sessions this week, our system triggered a **Flag A Cognitive Overload** on multi-step trigonometric proofs and optimization problems. As you shared with us: 'For Waterloo Engineering and U of T Computer Science, she needs at least a 92% in MHF4U and MCV4U—we need a real Ontario specialist tutor 1-on-1 every week on top of the 24/7 Socratic AI.'"*
-
-### 2. The Prime 1:1 Online Tutor Hybrid Architecture
-1. **1–2 Weekly Live Online 1:1 Sessions with a Senior Ontario STEM Educator:** Surgical instruction calibrated to their exact school teacher's unit exam rubric and Waterloo CEMC extension problems.
-2. **24/7 Socratic AI Guided Practice Between Sessions:** Ensures mastery sticks on Tuesday and Thursday nights between live sessions.
-3. **Executive Parent Briefings & OUAC Top-6 Grade Protection:** Direct weekly reporting from your Learning Manager.`,
+### 2. The Prime 1:1 Online Tutor Hybrid Architecture ($399/mo Base | $649/mo Intensive)
+• 4 × 60-Minute Live 1:1 Online STEM Tutoring Sessions per Month ($399/mo Base | 5-Mo Pass $1,795): Surgical instruction calibrated to their exact school teacher's unit exam rubric and Waterloo CEMC extension problems (strictly 4 × 60-minute sessions/month, or upgrade with the +$250/mo Intensive Add-on to $649/mo / $2,995 5-Mo Pass for 8 × 60-minute live sessions/month).
+• 24/7 Socratic AI Guided Practice Between Sessions: Ensures mastery sticks on Tuesday and Thursday nights between live sessions.
+• Tutor-Integrated Monthly 15-Minute Parent Briefing: Direct OUAC Top-6 prerequisite grade tracking with your lead educator (no duplicate Learning Manager handoff; Sibling add-on +$349/mo).`,
         single_cta:
-          "Reserve 1 of 2 Remaining Prime 1:1 Educator + Socratic AI Hybrid Seats for This Semester's OUAC Grade Window",
-        change_summary: "v1 Initial Tier 3 Prime consultative close script",
+          "Reserve 1 of 3 Remaining Prime 1:1 Educator + Socratic AI Hybrid Seats ($399/mo Base for 4×60m or $649/mo Intensive for 8×60m)",
+        change_summary: "v1 Initial Tier 3 Prime consultative close script ($399 base / $649 intensive)",
         timestamp: "15 mins ago",
       },
     ],
@@ -849,29 +868,28 @@ const TIER_3_PROPOSALS: Asset[] = [
       tier_id: "TIER_3",
       stage_id: "STAGE_1",
       bottleneck_stage: "STAGE_1",
+      status: "IN_REVIEW",
+      version: 1,
       title:
-        "Flag A Overload Tier 2 → Tier 3 Prime Upgrade Script & Grade 12 MHF4U/MCV4U/SBI4U Syllabus Roadmap",
-      channel: "1:1 Consult",
+        "Flag A Overload Tier 2 → Tier 3 Prime Consultation Script ($399/mo Base 4×60m | $649/mo Intensive 8×60m)",
+      channel: "Consultation",
       target_metric: "Consultation → Prime Close ≥ 40%",
       cited_voc_quotes: [
         '[VOC-106 · TIER_3 · curriculum] "For Waterloo Engineering and U of T Computer Science, she needs at least a 92% in MHF4U and MCV4U—we need a real Ontario specialist tutor 1-on-1 every week on top of the 24/7 Socratic AI."',
         '[VOC-104 · ALL · trust] "I don\'t trust services that promise a guaranteed 90% report card mark—I just want a calm system that holds my teen accountable three nights a week."',
       ],
       single_cta:
-        "Reserve 1 of 2 Remaining Prime 1:1 Educator + Socratic AI Hybrid Seats for This Semester's OUAC Grade Window",
-      asset_body: `## [Tier 3 · Prime 1:1 Online Tutor Hybrid ($349 CAD/mo) — Flag A Overload Consultation Script]
-**Target Family:** Grade 11/12 university-prep parents targeting Waterloo Engineering/CEMC, U of T CS, McMaster Health Sci, or Ivey/Rotman Business.
+        "Reserve 1 of 3 Remaining Prime 1:1 Educator + Socratic AI Hybrid Seats ($399/mo Base for 4×60m or $649/mo Intensive for 8×60m)",
+      asset_body: `### 1. The Flag A Overload Trigger (Why Tier 2 Families Upgrade to Tier 3 Prime)
+> "During {{student_first_name}}'s MHF4U/MCV4U Socratic AI sessions this week, our system triggered a Flag A Cognitive Overload on multi-step trigonometric proofs and optimization problems. As you shared with us: 'For Waterloo Engineering and U of T Computer Science, she needs at least a 92% in MHF4U and MCV4U—we need a real Ontario specialist tutor 1-on-1 every week on top of the 24/7 Socratic AI.'"
 
-### 1. The "Flag A Overload" Trigger (Why Tier 2 Families Upgrade to Tier 3 Prime)
-> *"During {{student_first_name}}'s MHF4U/MCV4U Socratic AI sessions this week, our system triggered a **Flag A Cognitive Overload** on multi-step trigonometric proofs and optimization problems. As you shared with us: 'For Waterloo Engineering and U of T Computer Science, she needs at least a 92% in MHF4U and MCV4U—we need a real Ontario specialist tutor 1-on-1 every week on top of the 24/7 Socratic AI.'"*
-
-### 2. The Prime 1:1 Online Tutor Hybrid Architecture
-1. **1–2 Weekly Live Online 1:1 Sessions with a Senior Ontario STEM Educator:** Surgical instruction calibrated to their exact school teacher's unit exam rubric and Waterloo CEMC extension problems.
-2. **24/7 Socratic AI Guided Practice Between Sessions:** Ensures mastery sticks on Tuesday and Thursday nights between live sessions.
-3. **Executive Parent Briefings & OUAC Top-6 Grade Protection:** Direct weekly reporting from your Learning Manager.`,
+### 2. The Prime 1:1 Online Tutor Hybrid Architecture ($399/mo Base | $649/mo Intensive)
+• 4 × 60-Minute Live 1:1 Online STEM Tutoring Sessions per Month ($399/mo Base | 5-Mo Pass $1,795): Surgical instruction calibrated to their exact school teacher's unit exam rubric and Waterloo CEMC extension problems (strictly 4 × 60-minute sessions/month, or upgrade with the +$250/mo Intensive Add-on to $649/mo / $2,995 5-Mo Pass for 8 × 60-minute live sessions/month).
+• 24/7 Socratic AI Guided Practice Between Sessions: Ensures mastery sticks on Tuesday and Thursday nights between live sessions.
+• Tutor-Integrated Monthly 15-Minute Parent Briefing: Direct OUAC Top-6 prerequisite grade tracking with your lead educator (no duplicate Learning Manager handoff; Sibling add-on +$349/mo).`,
       devils_advocate: {
         primary_failure_hypothesis:
-          "High-expectation Grade 11/12 parents will hesitate at $349 CAD/mo if they do not see the exact credentials of the live 1:1 Ontario STEM educator and a custom week-by-week syllabus plan before the end of the consultation.",
+          "High-expectation Grade 11/12 parents will hesitate at $399–$649 CAD/mo if they do not see the exact credentials of the live 1:1 Ontario STEM educator and a custom week-by-week syllabus plan before the end of the consultation.",
         blind_spot_question:
           "Does the consultation include a 1-page custom 6-week MHF4U/MCV4U/SBI4U exam calendar mapped to their teen's upcoming school unit tests?",
       },
@@ -882,18 +900,15 @@ const TIER_3_PROPOSALS: Asset[] = [
           "Offer Tier 2 Flag A families a '2-Session Live 1:1 Midterm Intensive Bridge ($95 CAD credit toward Prime)' so they experience the live educator before committing to the monthly Prime seat.",
       },
       revision_notes:
-        "v1 Consultative close script for Tier 3 Prime — zero discount or mass-market framing.",
+        "v1 Consultative close script for Tier 3 Prime ($399/mo 4×60m base | $649/mo 8×60m intensive).",
     },
-    content: `## [Tier 3 · Prime 1:1 Online Tutor Hybrid ($349 CAD/mo) — Flag A Overload Consultation Script]
-**Target Family:** Grade 11/12 university-prep parents targeting Waterloo Engineering/CEMC, U of T CS, McMaster Health Sci, or Ivey/Rotman Business.
+    content: `### 1. The Flag A Overload Trigger (Why Tier 2 Families Upgrade to Tier 3 Prime)
+> "During {{student_first_name}}'s MHF4U/MCV4U Socratic AI sessions this week, our system triggered a Flag A Cognitive Overload on multi-step trigonometric proofs and optimization problems. As you shared with us: 'For Waterloo Engineering and U of T Computer Science, she needs at least a 92% in MHF4U and MCV4U—we need a real Ontario specialist tutor 1-on-1 every week on top of the 24/7 Socratic AI.'"
 
-### 1. The "Flag A Overload" Trigger (Why Tier 2 Families Upgrade to Tier 3 Prime)
-> *"During {{student_first_name}}'s MHF4U/MCV4U Socratic AI sessions this week, our system triggered a **Flag A Cognitive Overload** on multi-step trigonometric proofs and optimization problems. As you shared with us: 'For Waterloo Engineering and U of T Computer Science, she needs at least a 92% in MHF4U and MCV4U—we need a real Ontario specialist tutor 1-on-1 every week on top of the 24/7 Socratic AI.'"*
-
-### 2. The Prime 1:1 Online Tutor Hybrid Architecture
-1. **1–2 Weekly Live Online 1:1 Sessions with a Senior Ontario STEM Educator:** Surgical instruction calibrated to their exact school teacher's unit exam rubric and Waterloo CEMC extension problems.
-2. **24/7 Socratic AI Guided Practice Between Sessions:** Ensures mastery sticks on Tuesday and Thursday nights between live sessions.
-3. **Executive Parent Briefings & OUAC Top-6 Grade Protection:** Direct weekly reporting from your Learning Manager.`,
+### 2. The Prime 1:1 Online Tutor Hybrid Architecture ($399/mo Base | $649/mo Intensive)
+• 4 × 60-Minute Live 1:1 Online STEM Tutoring Sessions per Month ($399/mo Base | 5-Mo Pass $1,795): Surgical instruction calibrated to their exact school teacher's unit exam rubric and Waterloo CEMC extension problems (strictly 4 × 60-minute sessions/month, or upgrade with the +$250/mo Intensive Add-on to $649/mo / $2,995 5-Mo Pass for 8 × 60-minute live sessions/month).
+• 24/7 Socratic AI Guided Practice Between Sessions: Ensures mastery sticks on Tuesday and Thursday nights between live sessions.
+• Tutor-Integrated Monthly 15-Minute Parent Briefing: Direct OUAC Top-6 prerequisite grade tracking with your lead educator (no duplicate Learning Manager handoff; Sibling add-on +$349/mo).`,
   },
   {
     id: "t3-prop-s2-vip",
@@ -901,7 +916,7 @@ const TIER_3_PROPOSALS: Asset[] = [
     stage_id: "STAGE_2",
     campaign_id: "camp-ontario-fall",
     platform: "VIP Referral & Outcome Brief",
-    channel_badge: "VIP Brief",
+    channel_badge: "Email",
     title:
       "Anonymized Waterloo CEMC & Grade 12 MHF4U Turnaround Case Study (68% → 89%) + VIP Referral Note",
     detail_level_used: 2,
@@ -918,8 +933,8 @@ const TIER_3_PROPOSALS: Asset[] = [
     versions: [
       {
         version: 1,
-        content: `## Private Case Brief: Grade 12 Advanced Functions (MHF4U) & Waterloo Euclid Prep
-How an Oakville Grade 12 student moved from a 68% midterm mark to an 89% final exam score in 7 weeks by pairing 2x/week live 1:1 educator proof clinics with 4x/week Socratic AI homework drills.`,
+        content: `### Private Case Brief: Grade 12 Advanced Functions (MHF4U) & Waterloo Euclid Prep
+How an Oakville Grade 12 student moved from a 68% midterm mark to an 89% final exam score in 7 weeks by pairing 4 × 60-minute monthly live 1:1 educator proof clinics with 4x/week Socratic AI homework drills.`,
         single_cta:
           "Request a Private 15-Minute Academic Consultation for a Referred Family",
         change_summary: "v1 Approved VIP outcome brief",
@@ -931,17 +946,19 @@ How an Oakville Grade 12 student moved from a 68% midterm mark to an 89% final e
       tier_id: "TIER_3",
       stage_id: "STAGE_2",
       bottleneck_stage: "STAGE_2",
+      status: "LIVE",
+      version: 1,
       title:
         "Anonymized Waterloo CEMC & Grade 12 MHF4U Turnaround Case Study (68% → 89%) + VIP Referral Note",
-      channel: "VIP Brief",
+      channel: "Email",
       target_metric: "≥ 3 Turnaround Case Studies & VIP Referrals ≥ 30%",
       cited_voc_quotes: [
         '[VOC-106 · TIER_3 · curriculum] "For Waterloo Engineering and U of T Computer Science, she needs at least a 92% in MHF4U and MCV4U—we need a real Ontario specialist tutor 1-on-1 every week on top of the 24/7 Socratic AI."',
       ],
       single_cta:
         "Request a Private 15-Minute Academic Consultation for a Referred Family",
-      asset_body: `## Private Case Brief: Grade 12 Advanced Functions (MHF4U) & Waterloo Euclid Prep
-How an Oakville Grade 12 student moved from a 68% midterm mark to an 89% final exam score in 7 weeks by pairing 2x/week live 1:1 educator proof clinics with 4x/week Socratic AI homework drills.`,
+      asset_body: `### Private Case Brief: Grade 12 Advanced Functions (MHF4U) & Waterloo Euclid Prep
+How an Oakville Grade 12 student moved from a 68% midterm mark to an 89% final exam score in 7 weeks by pairing 4 × 60-minute monthly live 1:1 educator proof clinics with 4x/week Socratic AI homework drills.`,
       devils_advocate: {
         primary_failure_hypothesis:
           "Parents distrust case studies if they don't show the actual before/after rubric breakdown.",
@@ -956,30 +973,31 @@ How an Oakville Grade 12 student moved from a 68% midterm mark to an 89% final e
       },
       revision_notes: "Approved Stage 2 VIP referral asset.",
     },
-    content: `## Private Case Brief: Grade 12 Advanced Functions (MHF4U) & Waterloo Euclid Prep
-How an Oakville Grade 12 student moved from a 68% midterm mark to an 89% final exam score in 7 weeks by pairing 2x/week live 1:1 educator proof clinics with 4x/week Socratic AI homework drills.`,
+    content: `### Private Case Brief: Grade 12 Advanced Functions (MHF4U) & Waterloo Euclid Prep
+How an Oakville Grade 12 student moved from a 68% midterm mark to an 89% final exam score in 7 weeks by pairing 4 × 60-minute monthly live 1:1 educator proof clinics with 4x/week Socratic AI homework drills.`,
   },
 ];
 
 // ============================================================================
-// INITIAL 3 TIER WORKSPACES (`12/50`, `8/25`, `2/5`)
+// INITIAL 3 TIER WORKSPACES (`12/50`, `8/25`, `2/5`) WITH FINALIZED PRICING & LEDGER
 // ============================================================================
 const INITIAL_TIER_WORKSPACES: Record<TierId, TierWorkspaceState> = {
   TIER_1: {
     tier_id: "TIER_1",
     tier_name: "Tier 1 · Online Self-Coach",
     tier_short_name: "Tier 1 · Online",
-    price_label: "$39 CAD/mo Self-Serve",
+    price_label: "$39/mo | 5-mo Pass $165 | Sibling +$19/mo",
     monthly_price_cad: 39,
+    pricing_config: DEFAULT_TIER_PRICING.TIER_1,
     offer_summary:
-      "24/7 Socratic voice + LaTeX HUD AI coaching for Ontario Grades 9–12 STEM (fully automated, no human manager).",
+      "24/7 Socratic voice + LaTeX HUD AI coaching (fully self-serve, automated weekly email summary, no human manager).",
     target_persona:
       "Self-Serve Online Customers (Ontario Grades 9–12 STEM students & parents seeking 24/7 automated Socratic homework coaching).",
     tone_guardrail:
       "Never pitch 1-on-1 live human tutoring or dedicated human learning manager calls inside Tier 1 copy.",
     forbidden_cross_tier_claims: [
       "1-on-1 live human tutor sessions (Reserved for Tier 3)",
-      "Dedicated Human Learning Manager phone calls (Reserved for Tier 2 & 3)",
+      "Dedicated Human Learning Manager phone calls (Reserved for Tier 2)",
     ],
     forbidden_cross_tier_keywords: [
       "1-on-1 live tutor",
@@ -987,11 +1005,12 @@ const INITIAL_TIER_WORKSPACES: Record<TierId, TierWorkspaceState> = {
       "human learning manager call",
       "weekly live tutor",
       "1:1 educator",
+      "30-minute tutor",
     ],
     funnel_labels: [
       "Visitors/Leads",
-      "Free Diag Started",
-      "Diag Completed",
+      "Free Diagnostic Started",
+      "Diagnostic Completed",
       "Self-Serve Paid",
     ],
     north_star_paid_goal: 300,
@@ -1020,6 +1039,74 @@ const INITIAL_TIER_WORKSPACES: Record<TierId, TierWorkspaceState> = {
         ),
       },
     ],
+    monthly_ledger: [
+      recalculateLedgerEntryTotals(
+        {
+          id: "ledger-t1-2026-10",
+          period_month: "2026-10",
+          period_label: "October 2026",
+          tier_id: "TIER_1",
+          active_stage: "STAGE_1",
+          status: "CLOSED_AND_LOCKED",
+          opening_paid_students: 0,
+          new_paid_students: 6,
+          churned_students: 0,
+          closing_paid_students: 6,
+          semester_pass_5mo_count: 1,
+          sibling_addon_count: 1,
+          intensive_addon_count: 0,
+          reach_or_contacts: 240,
+          diag_or_consult_booked: 88,
+          diag_or_consult_completed: 64,
+          ad_spend_cad: 0,
+          recognized_mrr_cad: 0,
+          semester_pass_cash_collected_cad: 0,
+          total_gross_cash_cad: 0,
+          blended_cac_cad: 0,
+          finance_reconciliation_note:
+            "Reconciled against Stripe CAD Payouts: 5 monthly subscriptions ($39) + 1 5-Mo Semester Pass ($165 upfront, $33/mo amortized MRR) + 1 Sibling Add-on (+$19/mo).",
+          cmo_closing_audit_summary:
+            "Stage 1 Diag-to-Paid hit 9.4% (6/64). Day-7 student return reached 54% after enabling Socratic Voice + LaTeX HUD onboarding.",
+          next_month_stage_recommendation:
+            "Remain in Stage 1 (0–50 paid) and remove account-wall friction before showing diagnostic scores to lift Diag-to-Paid >= 12%.",
+          closed_at: "2026-10-31T18:00:00Z",
+          closed_by: "Acting CMO",
+        },
+        DEFAULT_TIER_PRICING.TIER_1
+      ),
+      recalculateLedgerEntryTotals(
+        {
+          id: "ledger-t1-2026-11",
+          period_month: "2026-11",
+          period_label: "November 2026 (Current Period)",
+          tier_id: "TIER_1",
+          active_stage: "STAGE_1",
+          status: "OPEN",
+          opening_paid_students: 6,
+          new_paid_students: 7,
+          churned_students: 1,
+          closing_paid_students: 12,
+          semester_pass_5mo_count: 2,
+          sibling_addon_count: 3,
+          intensive_addon_count: 0,
+          reach_or_contacts: 420,
+          diag_or_consult_booked: 165,
+          diag_or_consult_completed: 120,
+          ad_spend_cad: 140,
+          recognized_mrr_cad: 0,
+          semester_pass_cash_collected_cad: 0,
+          total_gross_cash_cad: 0,
+          blended_cac_cad: 0,
+          finance_reconciliation_note:
+            "10 active monthly ($39) + 2 5-Mo Semester Passes ($165) + 3 Sibling seats (+$19/mo). Zero refund disputes.",
+          cmo_closing_audit_summary:
+            "Diag-to-Paid improved to 10.0% (12/120 cumulative, 24% towards Stage 1 $1,950 MRR milestone). Sibling add-on attachment at 25%.",
+          next_month_stage_recommendation:
+            "Keep Stage 1 focus on post-diagnostic checkout bridge until 12% Diag-to-Paid threshold is sustained across 100 completions.",
+        },
+        DEFAULT_TIER_PRICING.TIER_1
+      ),
+    ],
     proposals: TIER_1_PROPOSALS,
     selected_proposal_id: "t1-prop-onboarding",
   },
@@ -1028,20 +1115,22 @@ const INITIAL_TIER_WORKSPACES: Record<TierId, TierWorkspaceState> = {
     tier_id: "TIER_2",
     tier_name: "Tier 2 · Managed Hybrid",
     tier_short_name: "Tier 2 · Managed",
-    price_label: "$139 CAD/mo Managed Hybrid",
+    price_label: "$139/mo | 5-mo Pass $590 | Sibling +$79/mo",
     monthly_price_cad: 139,
+    pricing_config: DEFAULT_TIER_PRICING.TIER_2,
     offer_summary:
-      "24/7 AI Socratic coaching + Growing Success (K/T/C/A) parent reports + dedicated Learning Manager accountability & monthly 15-min parent briefings.",
+      "24/7 AI Socratic coaching + Growing Success (K/T/C/A) parent reports + dedicated Learning Manager accountability & monthly 20–30 min parent briefings.",
     target_persona:
       "Ontario parents of Grades 9–12 STEM students who want both 24/7 anti-cheating Socratic homework help AND a Human Learning Manager for weekly accountability.",
     tone_guardrail:
-      "Emphasize 24/7 Socratic AI + Human Learning Manager accountability & Growing Success K/T/C/A reports. Never promise 1–2x/week live 1:1 subject tutoring sessions (Reserved for Tier 3).",
+      "Emphasize 24/7 Socratic AI + Human Learning Manager accountability & Growing Success K/T/C/A reports. Never promise 4×60-min live 1:1 subject tutoring sessions (Reserved for Tier 3).",
     forbidden_cross_tier_claims: [
-      "1–2x/week live 1:1 subject tutoring sessions with an educator (Reserved for Tier 3 Prime)",
+      "4 × 60-minute live 1:1 subject tutoring sessions with an educator (Reserved for Tier 3 Prime)",
     ],
     forbidden_cross_tier_keywords: [
       "twice-weekly live 1:1 tutor",
       "1-on-1 live subject tutor",
+      "30-minute tutor",
     ],
     funnel_labels: [
       "Contacts/Leads",
@@ -1075,25 +1164,96 @@ const INITIAL_TIER_WORKSPACES: Record<TierId, TierWorkspaceState> = {
         ),
       },
     ],
+    monthly_ledger: [
+      recalculateLedgerEntryTotals(
+        {
+          id: "ledger-t2-2026-10",
+          period_month: "2026-10",
+          period_label: "October 2026",
+          tier_id: "TIER_2",
+          active_stage: "STAGE_1",
+          status: "CLOSED_AND_LOCKED",
+          opening_paid_students: 0,
+          new_paid_students: 5,
+          churned_students: 0,
+          closing_paid_students: 5,
+          semester_pass_5mo_count: 1,
+          sibling_addon_count: 1,
+          intensive_addon_count: 0,
+          reach_or_contacts: 92,
+          diag_or_consult_booked: 28,
+          diag_or_consult_completed: 22,
+          ad_spend_cad: 0,
+          recognized_mrr_cad: 0,
+          semester_pass_cash_collected_cad: 0,
+          total_gross_cash_cad: 0,
+          blended_cac_cad: 0,
+          finance_reconciliation_note:
+            "Reconciled: 4 monthly ($139) + 1 5-Mo Semester Pass ($590 upfront, $118/mo amortized MRR) + 1 Sibling Add-on (+$79/mo). 0 refunds triggered under 30-Day Active-Habit Guarantee.",
+          cmo_closing_audit_summary:
+            "Stage 1 Diag-to-Paid hit 22.7% (5/22). 10-minute parent debrief script out-converted email-only report delivery 3.2x.",
+          next_month_stage_recommendation:
+            "Stay locked in Stage 1 (0–25 paid, $3,475/mo target) and enforce 90-second live LaTeX error screen-share before quoting $139/mo.",
+          closed_at: "2026-10-31T18:00:00Z",
+          closed_by: "Acting CMO",
+        },
+        DEFAULT_TIER_PRICING.TIER_2
+      ),
+      recalculateLedgerEntryTotals(
+        {
+          id: "ledger-t2-2026-11",
+          period_month: "2026-11",
+          period_label: "November 2026 (Current Period)",
+          tier_id: "TIER_2",
+          active_stage: "STAGE_1",
+          status: "OPEN",
+          opening_paid_students: 5,
+          new_paid_students: 3,
+          churned_students: 0,
+          closing_paid_students: 8,
+          semester_pass_5mo_count: 2,
+          sibling_addon_count: 2,
+          intensive_addon_count: 0,
+          reach_or_contacts: 118,
+          diag_or_consult_booked: 34,
+          diag_or_consult_completed: 26,
+          ad_spend_cad: 0,
+          recognized_mrr_cad: 0,
+          semester_pass_cash_collected_cad: 0,
+          total_gross_cash_cad: 0,
+          blended_cac_cad: 0,
+          finance_reconciliation_note:
+            "6 monthly ($139) + 2 5-Mo Semester Passes ($590) + 2 Sibling seats (+$79/mo). 100% Week-4 retention across October cohort.",
+          cmo_closing_audit_summary:
+            "8/25 paid students active toward Stage 1 $3,475/mo milestone. Cold AI-first messaging killed via stop-loss; K/T/C/A debrief script is primary driver.",
+          next_month_stage_recommendation:
+            "Execute 72-Hr Undecided Parent Follow-Up sequence to lift Diag-to-Paid above 25% and cross 25 paid students.",
+        },
+        DEFAULT_TIER_PRICING.TIER_2
+      ),
+    ],
     proposals: TIER_2_PROPOSALS,
     selected_proposal_id: "asset-stage1-debrief",
   },
 
   TIER_3: {
     tier_id: "TIER_3",
-    tier_name: "Tier 3 · Prime 1:1 Online Tutor Hybrid",
+    tier_name: "Tier 3 · Prime 1:1 Online Tutor",
     tier_short_name: "Tier 3 · Prime 1:1",
-    price_label: "$349 CAD/mo Prime 1:1",
-    monthly_price_cad: 349,
+    price_label:
+      "$399/mo base (4×60m) | +$250/mo Intensive ($649/mo 8×60m) | 5-mo Pass $1,795/$2,995 | Sibling +$349/mo",
+    monthly_price_cad: 399,
+    pricing_config: DEFAULT_TIER_PRICING.TIER_3,
     offer_summary:
-      "1–2 weekly live online 1:1 tutoring sessions with an educator + 24/7 AI Socratic practice between sessions + executive parent reporting.",
+      "24/7 AI coaching + 4 × 60-minute live 1:1 online STEM tutoring sessions/month (strictly 4 sessions/mo cap to prevent 4.33-week calendar margin leakage) + tutor-integrated monthly 15-min parent briefing. Optional +$250/mo Add-on ($649/mo) upgrades to 8 × 60-minute live sessions/month.",
     target_persona:
       "Grade 11–12 university-prep / high-anxiety families (MHF4U, MCV4U, SBI4U, Waterloo CEMC) & Tier 2 upsell candidates.",
     tone_guardrail:
-      "Consultative, executive university-prep positioning. Never use 'cheap self-serve' or discount promo framing that erodes premium positioning.",
+      "Consultative, executive university-prep positioning. Strictly 4 × 60-minute (or 8 × 60-minute Intensive) live sessions/month. Never use 'cheap self-serve', discount promos, or 30-minute session framing.",
     forbidden_cross_tier_claims: [
       "Cheap self-serve / budget discount framing",
       "Coupon codes or mass-market flash sales",
+      "Uncapped weekly tutoring or 30-minute sessions",
     ],
     forbidden_cross_tier_keywords: [
       "cheap self-serve",
@@ -1102,9 +1262,10 @@ const INITIAL_TIER_WORKSPACES: Record<TierId, TierWorkspaceState> = {
       "coupon",
       "flash sale",
       "50% off",
+      "30-minute tutor",
     ],
     funnel_labels: [
-      "Inquiries / Tier 2 Upsells",
+      "Inquiries / Tier 2 Upsell Candidates",
       "Consultation Booked",
       "Consultation Completed",
       "Prime Enrolled",
@@ -1134,6 +1295,76 @@ const INITIAL_TIER_WORKSPACES: Record<TierId, TierWorkspaceState> = {
           (q) => q.tier_id === "TIER_3" || q.tier_id === "ALL"
         ),
       },
+    ],
+    monthly_ledger: [
+      recalculateLedgerEntryTotals(
+        {
+          id: "ledger-t3-2026-10",
+          period_month: "2026-10",
+          period_label: "October 2026",
+          tier_id: "TIER_3",
+          active_stage: "STAGE_1",
+          status: "CLOSED_AND_LOCKED",
+          opening_paid_students: 0,
+          new_paid_students: 1,
+          churned_students: 0,
+          closing_paid_students: 1,
+          semester_pass_5mo_count: 0,
+          sibling_addon_count: 0,
+          intensive_addon_count: 1,
+          reach_or_contacts: 9,
+          diag_or_consult_booked: 4,
+          diag_or_consult_completed: 3,
+          ad_spend_cad: 0,
+          tutor_delivery_hours: 8,
+          recognized_mrr_cad: 0,
+          semester_pass_cash_collected_cad: 0,
+          total_gross_cash_cad: 0,
+          blended_cac_cad: 0,
+          finance_reconciliation_note:
+            "Reconciled: 1 Prime Base Seat ($399/mo) + 1 Intensive 8×60-min Add-on (+$250/mo) = $649 CAD MRR. Tutor delivered exactly 8.0 hours (zero 4.33-week calendar leakage).",
+          cmo_closing_audit_summary:
+            "First Tier 2 Flag A upgrade closed at $649/mo (33.3% Consult-to-Close). Tutor-integrated 15-min briefing eliminated duplicate manager cost.",
+          next_month_stage_recommendation:
+            "Target 5 Prime seats ($1,995/mo base MRR) by auditing all Tier 2 MHF4U/MCV4U students for Flag A overload 21 days before midterms.",
+          closed_at: "2026-10-31T18:00:00Z",
+          closed_by: "Acting CMO",
+        },
+        DEFAULT_TIER_PRICING.TIER_3
+      ),
+      recalculateLedgerEntryTotals(
+        {
+          id: "ledger-t3-2026-11",
+          period_month: "2026-11",
+          period_label: "November 2026 (Current Period)",
+          tier_id: "TIER_3",
+          active_stage: "STAGE_1",
+          status: "OPEN",
+          opening_paid_students: 1,
+          new_paid_students: 1,
+          churned_students: 0,
+          closing_paid_students: 2,
+          semester_pass_5mo_count: 0,
+          sibling_addon_count: 0,
+          intensive_addon_count: 1,
+          reach_or_contacts: 18,
+          diag_or_consult_booked: 9,
+          diag_or_consult_completed: 6,
+          ad_spend_cad: 0,
+          tutor_delivery_hours: 12,
+          recognized_mrr_cad: 0,
+          semester_pass_cash_collected_cad: 0,
+          total_gross_cash_cad: 0,
+          blended_cac_cad: 0,
+          finance_reconciliation_note:
+            "2 Prime Base Seats (2 × $399 = $798) + 1 Intensive Add-on (+$250) = $1,048 CAD MRR. Total live delivery capped at 12 × 60-min sessions.",
+          cmo_closing_audit_summary:
+            "2/5 Prime seats filled ($1,048/mo actual MRR with Intensive add-on vs $1,995/mo Stage 1 base goal). Consult-to-Close at 33.3% vs 40% target.",
+          next_month_stage_recommendation:
+            "Deploy custom 6-week school-specific MHF4U/MCV4U syllabus roadmap during consultation to push Consult-to-Close >= 40%.",
+        },
+        DEFAULT_TIER_PRICING.TIER_3
+      ),
     ],
     proposals: TIER_3_PROPOSALS,
     selected_proposal_id: "t3-prop-consult",
@@ -1370,6 +1601,7 @@ export const useMarketingStore = create<MarketingState>((set, get) => {
     isRealityGateModalOpen: false,
     isVocVaultOpen: false,
     isAiDrawerOpen: false,
+    isLedgerClosingModalOpen: false,
     inspectedRiskProposalIds: {},
 
     isSampleSeedActive: true,
@@ -1464,16 +1696,101 @@ export const useMarketingStore = create<MarketingState>((set, get) => {
         };
       }),
 
+    updateTierPricingConfig: (tierId, partialPricing) =>
+      set((state) => {
+        const ws = state.tierWorkspaces[tierId];
+        const updatedPricing: TierPricingConfig = {
+          ...ws.pricing_config,
+          ...partialPricing,
+        };
+        const updatedLedger = ws.monthly_ledger.map((entry) =>
+          recalculateLedgerEntryTotals(entry, updatedPricing)
+        );
+        const updatedWs: TierWorkspaceState = {
+          ...ws,
+          monthly_price_cad: updatedPricing.base_monthly_cad,
+          pricing_config: updatedPricing,
+          price_label: formatTierPriceSummary(tierId, updatedPricing),
+          monthly_ledger: updatedLedger,
+        };
+        return {
+          tierWorkspaces: { ...state.tierWorkspaces, [tierId]: updatedWs },
+          ...syncMirrorsFromTier(
+            tierId === state.activeTierId
+              ? updatedWs
+              : state.tierWorkspaces[state.activeTierId]
+          ),
+          diagnosticToast: `Updated ${ws.tier_short_name} unit pricing & dynamically recalculated all Stage MRR, Quarterly, ARR, and Monthly Ledger totals.`,
+        };
+      }),
+
+    updateMonthlyLedgerEntry: (tierId, entryId, partialEntry) =>
+      set((state) => {
+        const ws = state.tierWorkspaces[tierId];
+        const updatedLedger = ws.monthly_ledger.map((entry) => {
+          if (entry.id !== entryId) return entry;
+          return recalculateLedgerEntryTotals(
+            { ...entry, ...partialEntry },
+            ws.pricing_config
+          );
+        });
+        const latestOpen = updatedLedger[updatedLedger.length - 1];
+        const updatedPaidCount = latestOpen
+          ? latestOpen.closing_paid_students
+          : ws.current_paid_count;
+        const updatedWs: TierWorkspaceState = {
+          ...ws,
+          current_paid_count: updatedPaidCount,
+          monthly_ledger: updatedLedger,
+        };
+        return {
+          tierWorkspaces: { ...state.tierWorkspaces, [tierId]: updatedWs },
+          ...syncMirrorsFromTier(
+            tierId === state.activeTierId
+              ? updatedWs
+              : state.tierWorkspaces[state.activeTierId]
+          ),
+        };
+      }),
+
+    closeAndLockMonthlyLedgerPeriod: (tierId, entryId, nextStatus) =>
+      set((state) => {
+        const ws = state.tierWorkspaces[tierId];
+        const updatedLedger = ws.monthly_ledger.map((entry) =>
+          entry.id === entryId
+            ? {
+                ...entry,
+                status: nextStatus,
+                closed_at:
+                  nextStatus === "CLOSED_AND_LOCKED"
+                    ? new Date().toISOString()
+                    : entry.closed_at,
+                closed_by: "Acting CMO",
+              }
+            : entry
+        );
+        const updatedWs: TierWorkspaceState = {
+          ...ws,
+          monthly_ledger: updatedLedger,
+        };
+        return {
+          tierWorkspaces: { ...state.tierWorkspaces, [tierId]: updatedWs },
+          diagnosticToast: `[${ws.tier_short_name}] Monthly Ledger Period updated to ${nextStatus}.`,
+        };
+      }),
+
     setStageFunnelModalOpen: (open) =>
       set({
         isStageFunnelModalOpen: open,
         isRealityGateModalOpen: open ? false : get().isRealityGateModalOpen,
+        isLedgerClosingModalOpen: open ? false : get().isLedgerClosingModalOpen,
       }),
 
     setRealityGateModalOpen: (open) =>
       set({
         isRealityGateModalOpen: open,
         isStageFunnelModalOpen: open ? false : get().isStageFunnelModalOpen,
+        isLedgerClosingModalOpen: open ? false : get().isLedgerClosingModalOpen,
       }),
 
     setVocVaultOpen: (open) =>
@@ -1486,6 +1803,13 @@ export const useMarketingStore = create<MarketingState>((set, get) => {
       set({
         isAiDrawerOpen: open,
         isVocVaultOpen: open ? false : get().isVocVaultOpen,
+      }),
+
+    setLedgerClosingModalOpen: (open) =>
+      set({
+        isLedgerClosingModalOpen: open,
+        isStageFunnelModalOpen: open ? false : get().isStageFunnelModalOpen,
+        isRealityGateModalOpen: open ? false : get().isRealityGateModalOpen,
       }),
 
     markProposalRiskInspected: (proposalId) =>
@@ -1502,6 +1826,7 @@ export const useMarketingStore = create<MarketingState>((set, get) => {
         isRealityGateModalOpen: false,
         isVocVaultOpen: false,
         isAiDrawerOpen: false,
+        isLedgerClosingModalOpen: false,
       }),
 
     setActiveTab: (tab) => set({ activeTab: tab }),
