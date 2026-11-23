@@ -2,7 +2,11 @@
 
 import React, { useState } from "react";
 import { useMarketingStore } from "@/store/useMarketingStore";
-import { PlanHorizon } from "@/types/database";
+import { Asset, PlanHorizon, TierId } from "@/types/database";
+import {
+  ChannelAwareDraftRenderer,
+  stripMarkdownToCleanText,
+} from "@/components/ChannelAwareDraftRenderer";
 import {
   Bot,
   CalendarClock,
@@ -16,6 +20,13 @@ import {
   ArrowUpRight,
   Layers,
   RefreshCw,
+  Copy,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  AlertTriangle,
+  ShieldAlert,
+  FileText,
 } from "lucide-react";
 
 const HORIZONS: {
@@ -25,8 +36,8 @@ const HORIZONS: {
 }[] = [
   { id: "Daily", label: "Daily Plan", sub: "Today's high-intent execution" },
   { id: "Weekly", label: "Weekly Sprint", sub: "5-day lead & conversion sprint" },
-  { id: "Monthly", label: "Monthly Roadmap", sub: "30-day funnel & school council" },
-  { id: "Quarterly", label: "Quarterly OKRs", sub: "90-day course hubs & referrals" },
+  { id: "Monthly", label: "Monthly Roadmap", sub: "30-day funnel & upgrades" },
+  { id: "Quarterly", label: "Quarterly OKRs", sub: "90-day course checklists & referrals" },
   { id: "Annual", label: "Annual 4-Peak Cycle", sub: "Full Ontario academic year" },
 ];
 
@@ -52,9 +63,18 @@ export function CmoPlannerAgentsView() {
     askCmoPlannerQuestion,
     reassignActivityAgent,
     setActiveTab,
+    setActiveTierId,
+    setSelectedProposalId,
+    tierWorkspaces,
+    approveAndLockProposal,
+    toggleCmoChecklistItem,
   } = useMarketingStore();
 
   const [cmoQuestionInput, setCmoQuestionInput] = useState("");
+  const [expandedAssetIds, setExpandedAssetIds] = useState<
+    Record<string, boolean>
+  >({});
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const horizonActivities = plannedActivities.filter(
     (a) => a.horizon === activeHorizon
@@ -66,12 +86,62 @@ export function CmoPlannerAgentsView() {
     (a) => a.status === "Completed"
   ).length;
 
+  // Helper to locate a generated Asset across any of the 3 Tier Workspaces
+  const findGeneratedAsset = (assetId?: string): Asset | undefined => {
+    if (!assetId) return undefined;
+    for (const tid of ["TIER_1", "TIER_2", "TIER_3"] as TierId[]) {
+      const found = tierWorkspaces[tid].proposals.find((p) => p.id === assetId);
+      if (found) return found;
+    }
+    return undefined;
+  };
+
   const handleAskCmoQuestion = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!cmoQuestionInput.trim() || isAskingPlannerQa) return;
     const q = cmoQuestionInput.trim();
     setCmoQuestionInput("");
     await askCmoPlannerQuestion(q);
+  };
+
+  const handleCopyInlineAsset = async (asset: Asset) => {
+    const cleanText = stripMarkdownToCleanText(asset.content);
+    const cta = asset.proposal_schema?.single_cta
+      ? `\n\n${stripMarkdownToCleanText(asset.proposal_schema.single_cta)}`
+      : "";
+    await navigator.clipboard.writeText(`${cleanText}${cta}`.trim());
+    setCopiedId(asset.id);
+    setTimeout(() => setCopiedId(null), 1800);
+  };
+
+  const handleQuickApproveFromPlanner = (asset: Asset) => {
+    const targetTier = asset.tier_id || "TIER_2";
+    setActiveTierId(targetTier);
+    // Ensure all 3 checklist items are marked true if not already, then lock
+    const chk = asset.cmo_checklist || {
+      ontario_context: false,
+      single_cta: false,
+      brand_trust: false,
+    };
+    if (!chk.ontario_context) {
+      toggleCmoChecklistItem(asset.id, "ontario_context");
+    }
+    if (!chk.single_cta) {
+      toggleCmoChecklistItem(asset.id, "single_cta");
+    }
+    if (!chk.brand_trust) {
+      toggleCmoChecklistItem(asset.id, "brand_trust");
+    }
+    approveAndLockProposal(asset.id);
+    // Return user right back to planner tab so they don't lose their place!
+    setActiveTab("planner");
+  };
+
+  const handleOpenInCampaignsTab = (asset: Asset) => {
+    const targetTier = asset.tier_id || "TIER_2";
+    setActiveTierId(targetTier);
+    setSelectedProposalId(asset.id);
+    setActiveTab("copilot");
   };
 
   return (
@@ -81,16 +151,16 @@ export function CmoPlannerAgentsView() {
         <div>
           <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-teal-700 mb-1">
             <Bot className="w-4 h-4" />
-            Multi-Agent Marketing Operating System
+            Step 2 of Workflow · Plan &amp; Dispatch Specialist Agents
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">
             CMO Multi-Horizon Planner &amp; Autonomous Agent Team
           </h1>
           <p className="text-sm text-slate-600 max-w-3xl mt-1">
-            Daily, Weekly, Monthly, Quarterly, and Annual execution plans
-            synchronized with Ontario Grades 9–12 STEM trends. Ask questions to
-            dynamically adjust the schedule, or dispatch specialist agents to
-            draft lead-generation and conversion assets.
+            Review Daily, Weekly, Monthly, Quarterly, and Annual execution
+            plans. Dispatch any specialist agent below and inspect, copy, or
+            approve the generated draft summary right inside this card—without
+            having to switch back and forth between tabs.
           </p>
         </div>
 
@@ -114,7 +184,7 @@ export function CmoPlannerAgentsView() {
       </div>
 
       {/* =====================================================================
-          SECTION 1: 5-AGENT SELF-GUIDED MARKETING TEAM ROSTER
+          SECTION 1: 5-AGENT MARKETING TEAM ROSTER
           ===================================================================== */}
       <div className="bg-slate-900 text-white rounded-2xl p-6 shadow-lg border border-slate-800 space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
@@ -123,11 +193,12 @@ export function CmoPlannerAgentsView() {
               Autonomous Marketing Team (5 Specialist Agents)
             </span>
             <h2 className="text-lg font-bold">
-              Task-Specialized Agent Roster & Conversion KPI Ownership
+              Task-Specialized Agent Roster &amp; Conversion KPI Ownership
             </h2>
           </div>
           <span className="text-xs font-semibold px-3 py-1 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30">
-            All Outputs Route to Campaign Co-Pilot Canvas
+            Generated Drafts Appear Inline Below &amp; Sync to Campaigns &amp;
+            Tiers
           </span>
         </div>
 
@@ -201,7 +272,7 @@ export function CmoPlannerAgentsView() {
             </div>
             <div>
               <h2 className="font-bold text-slate-900 text-base">
-                Interactive CMO Plan Q&A & Dynamic Re-Calibration
+                Interactive CMO Plan Q&amp;A &amp; Dynamic Re-Calibration
               </h2>
               <p className="text-xs text-slate-500">
                 Ask questions, challenge assumptions, or issue new directives —
@@ -264,7 +335,7 @@ export function CmoPlannerAgentsView() {
                   </span>
                 </div>
                 <p className="text-slate-700 whitespace-pre-line leading-relaxed">
-                  {item.strategistAnswer}
+                  {stripMarkdownToCleanText(item.strategistAnswer)}
                 </p>
                 {item.planAdjustmentsMade.length > 0 && (
                   <div className="flex flex-wrap gap-2 pt-1">
@@ -285,7 +356,7 @@ export function CmoPlannerAgentsView() {
       </div>
 
       {/* =====================================================================
-          SECTION 3: 5-HORIZON TACTICAL OPERATING PLAN (DAILY -> ANNUAL)
+          SECTION 3: 5-HORIZON TACTICAL OPERATING PLAN WITH INLINE DRAFT SUMMARY
           ===================================================================== */}
       <div className="space-y-5">
         {/* Horizon Switcher Tabs */}
@@ -350,13 +421,18 @@ export function CmoPlannerAgentsView() {
               agents.find((ag) => ag.id === act.assignedAgentId) || agents[0];
             const isRunning = runningActivityId === act.id;
             const isDone = act.status === "Completed";
+            const generatedAsset = findGeneratedAsset(act.outputAssetId);
+            const isFullDraftExpanded = Boolean(expandedAssetIds[act.id]);
+            const isAssetApproved =
+              generatedAsset?.hitl_state === "APPROVED_FOR_EXECUTION" ||
+              generatedAsset?.hitl_state === "VALIDATED_WINNER";
 
             return (
               <div
                 key={act.id}
                 className={`bg-white rounded-2xl border p-6 shadow-xs transition ${
                   isDone
-                    ? "border-emerald-300 bg-emerald-50/20"
+                    ? "border-emerald-300 bg-emerald-50/15"
                     : act.adjustedByCmo
                     ? "border-teal-500 ring-1 ring-teal-500/20"
                     : "border-slate-200"
@@ -368,17 +444,22 @@ export function CmoPlannerAgentsView() {
                     <span className="text-xs font-bold px-3 py-1 rounded-full bg-slate-900 text-white">
                       {act.timeWindow}
                     </span>
+                    {act.tier_id && (
+                      <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                        {tierWorkspaces[act.tier_id].tier_short_name} ($
+                        {
+                          tierWorkspaces[act.tier_id].pricing_config
+                            .base_monthly_cad
+                        }
+                        /mo)
+                      </span>
+                    )}
                     <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-teal-50 text-teal-800 border border-teal-200">
                       {act.funnelObjective}
                     </span>
-                    <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
-                      Deliverable: {act.targetPlatform} (`{act.skillName}`)
+                    <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                      Channel: {act.targetPlatform}
                     </span>
-                    {act.adjustedByCmo && (
-                      <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
-                        ★ Adjusted by CMO Q&A / Signal
-                      </span>
-                    )}
                   </div>
 
                   <div className="flex items-center gap-1.5">
@@ -393,38 +474,39 @@ export function CmoPlannerAgentsView() {
                   </div>
                 </div>
 
-                {/* Activity Title & Concrete Tactical Execution */}
+                {/* Activity Title & Detailed Step-by-Step Execution Guide */}
                 <h3 className="text-lg font-extrabold text-slate-900 mb-2">
                   {act.title}
                 </h3>
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 text-xs">
-                  <div className="lg:col-span-8 p-4 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2">
+                  <div className="lg:col-span-8 p-4 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2.5">
                     <div className="font-bold text-slate-900 uppercase tracking-wider text-[11px]">
-                      Execution Plan:
+                      Step-by-Step Execution Guide (Who, What &amp; Closing
+                      Offer):
                     </div>
-                    <p className="text-slate-700 leading-relaxed text-xs">
+                    <div className="text-slate-700 leading-relaxed text-xs whitespace-pre-line">
                       {act.tacticalExecution}
-                    </p>
-                    <div className="pt-1 text-slate-600">
+                    </div>
+                    <div className="pt-1.5 border-t border-slate-200/70 text-slate-600">
                       <strong className="text-slate-900">
-                        Deliverable:
+                        Deliverable Produced by Agent:
                       </strong>{" "}
                       {act.deliverableSpec}
                     </div>
                   </div>
 
                   <div className="lg:col-span-4 p-4 rounded-xl bg-teal-50/60 border border-teal-200/80 flex flex-col justify-between space-y-2">
-                    <div className="space-y-1.5">
+                    <div className="space-y-2">
                       <div className="font-bold text-teal-900 uppercase tracking-wider text-[11px] flex items-center gap-1">
                         <Target className="w-3.5 h-3.5" />
-                        Market Trigger & Target KPI
+                        Why Now &amp; Target KPI
                       </div>
-                      <p className="text-slate-700">
-                        <strong>Trigger:</strong> {act.marketTrigger}
+                      <p className="text-slate-700 leading-relaxed">
+                        <strong>Why Now:</strong> {act.marketTrigger}
                       </p>
-                      <p className="text-teal-900 font-bold">
-                        <strong>KPI:</strong> {act.targetKpi}
+                      <p className="text-teal-900 font-bold leading-relaxed">
+                        <strong>Success Target:</strong> {act.targetKpi}
                       </p>
                     </div>
 
@@ -435,6 +517,174 @@ export function CmoPlannerAgentsView() {
                     )}
                   </div>
                 </div>
+
+                {/* ========================================================= */}
+                {/* INLINE GENERATED DELIVERABLE SUMMARY & FULL PREVIEW CARD  */}
+                {/* Eliminates tab ping-pong — review, copy, or approve here! */}
+                {/* ========================================================= */}
+                {isDone && generatedAsset && (
+                  <div className="mt-4 rounded-2xl border border-emerald-300 bg-white shadow-xs overflow-hidden">
+                    {/* Summary Header Bar */}
+                    <div className="px-5 py-3 bg-emerald-50/70 border-b border-emerald-200 flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-600 text-white">
+                          <CheckCircle2 className="w-3 h-3" />
+                          <span>Generated Deliverable Summary</span>
+                        </span>
+                        <span className="text-xs font-bold text-slate-900">
+                          {stripMarkdownToCleanText(
+                            generatedAsset.title || act.title
+                          )}
+                        </span>
+                        {isAssetApproved && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-300">
+                            ✓ Approved &amp; Locked
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {/* 1-Click Copy Clean Text Right Here */}
+                        <button
+                          type="button"
+                          onClick={() => handleCopyInlineAsset(generatedAsset)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 shadow-2xs"
+                        >
+                          {copiedId === generatedAsset.id ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-emerald-600" />
+                              <span className="text-emerald-700">
+                                Copied Clean Text!
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5 text-slate-500" />
+                              <span>Copy Clean Text</span>
+                            </>
+                          )}
+                        </button>
+
+                        {/* 1-Click Quick Approve Right Here in Planner */}
+                        {!isAssetApproved && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleQuickApproveFromPlanner(generatedAsset)
+                            }
+                            className="inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Quick Approve Here</span>
+                          </button>
+                        )}
+
+                        {/* Toggle Full Formatted Preview Inline */}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedAssetIds((prev) => ({
+                              ...prev,
+                              [act.id]: !prev[act.id],
+                            }))
+                          }
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>
+                            {isFullDraftExpanded
+                              ? "Hide Full Script"
+                              : "Read Full Script Inline"}
+                          </span>
+                          {isFullDraftExpanded ? (
+                            <ChevronUp className="w-3.5 h-3.5" />
+                          ) : (
+                            <ChevronDown className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Concise Executive Summary (Always visible when completed so user immediately understands what was generated) */}
+                    <div className="p-4 bg-white space-y-3 text-xs">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        {/* Box 1: Core Message Preview */}
+                        <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                            Executive Copy Preview
+                          </div>
+                          <p className="text-slate-800 line-clamp-3 leading-relaxed">
+                            {stripMarkdownToCleanText(generatedAsset.content)}
+                          </p>
+                        </div>
+
+                        {/* Box 2: Single CTA & Cited Parent Quote */}
+                        <div className="p-3 rounded-xl bg-indigo-50/50 border border-indigo-200/70 space-y-1">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-indigo-700">
+                            Single Next Action (CTA)
+                          </div>
+                          <p className="font-semibold text-slate-900 leading-snug">
+                            {stripMarkdownToCleanText(
+                              generatedAsset.proposal_schema?.single_cta ||
+                                "Complete enrollment action"
+                            )}
+                          </p>
+                          {generatedAsset.proposal_schema?.cited_voc_quotes?.[0] && (
+                            <p className="text-[11px] text-slate-500 truncate pt-1">
+                              Addresses:{" "}
+                              {
+                                generatedAsset.proposal_schema
+                                  .cited_voc_quotes[0]
+                              }
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Box 3: Devil's Advocate Risk & Stop-Loss */}
+                        <div className="p-3 rounded-xl bg-amber-50/50 border border-amber-200/80 space-y-1">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-amber-800 flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3 text-amber-600" />
+                            <span>Key Risk &amp; Stop-Loss</span>
+                          </div>
+                          <p className="text-slate-700 line-clamp-2 leading-snug">
+                            {generatedAsset.proposal_schema?.devils_advocate
+                              ?.primary_failure_hypothesis ||
+                              "Guard against generic sales tone."}
+                          </p>
+                          <p className="text-[11px] font-semibold text-rose-700 pt-0.5 flex items-center gap-1">
+                            <ShieldAlert className="w-3 h-3 shrink-0" />
+                            <span className="truncate">
+                              Stop-Loss:{" "}
+                              {generatedAsset.proposal_schema?.kill_criteria
+                                ?.stop_loss_metric || "< Target conversion"}
+                            </span>
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Expandable Full Channel-Aware Draft Preview (Right Inside CMO Planner!) */}
+                      {isFullDraftExpanded && (
+                        <div className="mt-3 pt-4 border-t border-slate-200">
+                          <ChannelAwareDraftRenderer
+                            content={generatedAsset.content}
+                            title={generatedAsset.title || act.title}
+                            channel={
+                              generatedAsset.proposal_schema?.channel ||
+                              generatedAsset.platform
+                            }
+                            tierName={
+                              tierWorkspaces[generatedAsset.tier_id || "TIER_2"]
+                                .tier_name
+                            }
+                            singleCta={
+                              generatedAsset.proposal_schema?.single_cta
+                            }
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* Bottom Action & Agent Assignment Bar */}
                 <div className="mt-4 pt-4 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-4">
@@ -458,13 +708,14 @@ export function CmoPlannerAgentsView() {
                   </div>
 
                   <div className="flex items-center gap-2.5">
-                    {isDone && act.outputAssetId && (
+                    {isDone && generatedAsset && (
                       <button
-                        onClick={() => setActiveTab("copilot")}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition"
+                        onClick={() => handleOpenInCampaignsTab(generatedAsset)}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-bold transition"
+                        title="Open in Campaigns & Tiers only if you want conversational AI refinement"
                       >
                         <Layers className="w-3.5 h-3.5" />
-                        View Generated Asset in Co-Pilot Canvas
+                        <span>Refine in Campaigns &amp; Tiers</span>
                         <ArrowUpRight className="w-3.5 h-3.5" />
                       </button>
                     )}
@@ -491,7 +742,8 @@ export function CmoPlannerAgentsView() {
                       ) : (
                         <>
                           <Play className="w-3.5 h-3.5" />
-                          Dispatch {assignedAgent.codeName} to Execute →
+                          Dispatch {assignedAgent.codeName} &amp; Show Summary
+                          Here →
                         </>
                       )}
                     </button>

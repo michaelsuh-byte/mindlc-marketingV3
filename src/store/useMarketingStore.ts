@@ -1520,30 +1520,69 @@ const INITIAL_COMPETITORS: CompetitorProfile[] = [
 
 const INITIAL_AGENTS: MarketingAgent[] = [
   {
+    id: "agent-intel",
+    codeName: "Agent-01 · Market Intel",
+    roleTitle: "Ontario School Calendar & Competitor Analyst",
+    specialty:
+      "Tracks GTA school board midterm/exam windows (TDSB, YRDSB, PDSB, HDSB), EQAO/OUAC deadlines, and competitor pricing gaps.",
+    primarySkillName: "copywriting",
+    targetPlatform: "Community",
+    funnelFocus: "Lead Generation",
+    status: "Idle / Ready",
+    tasksCompletedCount: 4,
+    conversionMetricOwned: "Qualified Parent Inquiries & Competitor Win-Rate",
+  },
+  {
+    id: "agent-seo",
+    codeName: "Agent-02 · Curriculum SEO",
+    roleTitle: "Ontario Course-Code Checklist & Lead Magnet Builder",
+    specialty:
+      "Creates unit-test checklists and practice guides for MPM2D, MCR3U, MHF4U, MCV4U, and SBI3U that lead students into the free diagnostic.",
+    primarySkillName: "ai-seo",
+    targetPlatform: "Landing Page",
+    funnelFocus: "Lead Generation",
+    status: "Idle / Ready",
+    tasksCompletedCount: 7,
+    conversionMetricOwned: "Organic Course-Code Leads → Free Diagnostic Started",
+  },
+  {
+    id: "agent-social",
+    codeName: "Agent-03 · Parent Community",
+    roleTitle: "GTA Parent Group & Seminar Outreach Specialist",
+    specialty:
+      "Writes helpful parent community posts, school council workshop invites, and local GTA ad copy rooted in real parent questions.",
+    primarySkillName: "social-content",
+    targetPlatform: "Community",
+    funnelFocus: "Lead Generation",
+    status: "Idle / Ready",
+    tasksCompletedCount: 5,
+    conversionMetricOwned: "Community Post & Seminar → Diagnostic Booked (≥ 40%)",
+  },
+  {
     id: "agent-cro",
     codeName: "Agent-04 · Stage-1 CRO",
-    roleTitle: "Stage-1 Funnel Conversion & Debrief Agent",
+    roleTitle: "Diagnostic Debrief & Checkout Conversion Specialist",
     specialty:
-      "Optimizes Tier 1 self-serve checkout UX, Tier 2 10-min debrief scripts, and Tier 3 1:1 consultative closes.",
+      "Optimizes Tier 1 post-diagnostic checkout screens, Tier 2 10-minute parent debrief call scripts, and Tier 3 1:1 consultation closes.",
     primarySkillName: "cro",
     targetPlatform: "Parent Call",
     funnelFocus: "Conversion Optimization",
     status: "Idle / Ready",
     tasksCompletedCount: 6,
-    conversionMetricOwned: "Stage 1 Conversion Gate (T1 ≥12% · T2 ≥25% · T3 ≥40%)",
+    conversionMetricOwned: "Diagnostic Completed → Paid Enrollment (T1 ≥12% · T2 ≥25% · T3 ≥40%)",
   },
   {
     id: "agent-lifecycle",
-    codeName: "Agent-05 · Lifecycle & Upgrades",
-    roleTitle: "Nurture, Referrals & Tier 2→3 Upgrade Agent",
+    codeName: "Agent-05 · Retention & Upgrades",
+    roleTitle: "Follow-Up, Sibling Referral & Tier 2→3 Upgrade Specialist",
     specialty:
-      "Runs post-diagnostic follow-ups, Stage 2 referral loops, and Tier 2 Flag A overload upgrades to Tier 3 Prime.",
+      "Runs 72-hour undecided parent follow-up emails, Week 4–6 referral invitations, and Tier 2 Flag A overload upgrades to Tier 3 Prime 1:1.",
     primarySkillName: "copywriting",
     targetPlatform: "Email",
     funnelFocus: "Parent Retention & Referral",
     status: "Idle / Ready",
     tasksCompletedCount: 5,
-    conversionMetricOwned: "Day-7 Retention, Referral Share & Tier 2→3 Upgrades",
+    conversionMetricOwned: "Day-7 Student Return, Referral Share & Tier 2→3 Upgrades",
   },
 ];
 
@@ -1552,20 +1591,132 @@ const INITIAL_PLANNED_ACTIVITIES: PlannedActivity[] = [
     id: "act-t2-daily",
     tier_id: "TIER_2",
     horizon: "Daily",
-    timeWindow: "Today · Tier 2 Stage 1 Priority",
+    timeWindow: "Today · Tier 2 ($139/mo) Stage 1 Priority",
     title:
-      "[Tier 2 · Managed] Deploy 10-Min Parent Debrief Script with Growing Success (K/T/C/A) Error Trace ($139 CAD/mo)",
+      "10-Minute Parent Diagnostic Debrief Call Script & K/T/C/A Error Walkthrough",
     tacticalExecution:
-      "Equip Human Learning Managers on today's debrief calls to screen-share the student's timestamped Socratic stall in Minutes 0–3, contrast $139/mo Managed Hybrid against $380/mo worksheet centres in Minutes 3–7, and close with the 30-Day Active-Habit Guarantee.",
+      "1. Who to contact: Parents whose teenager completed the free 20-minute Ontario STEM diagnostic today.\n2. Step-by-step action: In the first 90 seconds of the Zoom call, screen-share the exact problem where the student paused on an Ontario Growing Success Thinking & Application (T/A) step. Explain how MindLC's Socratic AI guides them step-by-step without giving away answers like ChatGPT, and how the dedicated Human Learning Manager follows up every week.\n3. Closing offer: Invite the parent to start Tier 2 Managed Hybrid ($139/mo or $590 5-month semester pass) backed by the 30-Day Active-Habit Refund Guarantee.",
     deliverableSpec:
-      "10-Min Parent Debrief Call Script + Growing Success K/T/C/A Report Header",
-    marketTrigger: "Tier 2 Diag->Paid is 14.3% (2/14) vs. >=25% Stage 1 Target",
+      "Complete 10-Minute Parent Call Script (Opening Screen-Share, K/T/C/A Rubric Explanation, $139/mo vs. $380/mo Centre Comparison, and 30-Day Guarantee Close)",
+    marketTrigger:
+      "Tier 2 Diagnostic-to-Paid conversion is currently 14.3% (2 of 14 calls) vs. our 25.0% Stage 1 target.",
     courseCodesTargeted: ["MHF4U", "SBI3U", "MCR3U", "MPM2D"],
     assignedAgentId: "agent-cro",
     skillName: "cro",
     targetPlatform: "Parent Call",
     funnelObjective: "Conversion Optimization",
-    targetKpi: "Lift Tier 2 Diag Completed → Paid from 14.3% to ≥ 25%",
+    targetKpi: "Lift Tier 2 Diagnostic Completed → Paid from 14.3% to ≥ 25%",
+    status: "Completed",
+    outputAssetId: "asset-stage1-debrief",
+    requiredStage: "STAGE_1",
+  },
+  {
+    id: "act-t1-daily-checkout",
+    tier_id: "TIER_1",
+    horizon: "Daily",
+    timeWindow: "Today · Tier 1 ($39/mo) Stage 1 Priority",
+    title:
+      "Post-Diagnostic Instant Score Screen & Self-Serve Checkout Bridge ($39/mo)",
+    tacticalExecution:
+      "1. Where this appears: Immediately after a Grade 9–12 student finishes their free 10-minute online diagnostic.\n2. Step-by-step action: Show the student's K/T/C/A step trace immediately on screen without forcing an account wall first. Highlight how the 24/7 Socratic Voice + LaTeX math board lets them speak math steps out loud instead of typing complex fractions.\n3. Closing offer: Present a one-click self-serve enrollment button for Tier 1 Online Self-Coach ($39/mo or $165 5-month pass, plus +$19/mo for a sibling).",
+    deliverableSpec:
+      "Post-Diagnostic Result Screen Copy + 1-Click Self-Serve Checkout Card",
+    marketTrigger:
+      "Tier 1 Self-Serve Diagnostic-to-Paid conversion is 10.0% (12 of 120) vs. our 12.0% Stage 1 target.",
+    courseCodesTargeted: ["MCR3U", "MPM2D", "MHF4U", "MTH1W"],
+    assignedAgentId: "agent-cro",
+    skillName: "cro",
+    targetPlatform: "Onboarding & Checkout UX",
+    funnelObjective: "Conversion Optimization",
+    targetKpi: "Lift Tier 1 Self-Serve Checkout Conversion from 10.0% to ≥ 12%",
+    status: "Queued",
+    requiredStage: "STAGE_1",
+  },
+  {
+    id: "act-t2-weekly-followup",
+    tier_id: "TIER_2",
+    horizon: "Weekly",
+    timeWindow: "This Week · Undecided Parent Recovery",
+    title:
+      "72-Hour Follow-Up Email Sequence for Undecided Diagnostic Parents ($139/mo)",
+    tacticalExecution:
+      "1. Who receives this: Parents who attended the 10-minute diagnostic debrief call this week but said 'Let me talk to my spouse tonight.'\n2. Step-by-step action: Send Touch 1 two hours after the call with their teen's 1-page Ontario K/T/C/A Cognitive Report attached. Send Touch 2 at 24 hours showing a sample Friday Learning Manager accountability scorecard.\n3. Closing offer: Direct enrollment link for Tier 2 Managed Hybrid ($139/mo) with the 30-Day Active-Habit Refund Guarantee.",
+    deliverableSpec:
+      "2-Part Parent Follow-Up Email Sequence (Subject Lines, K/T/C/A Summary Body, and Single Enrollment Link)",
+    marketTrigger:
+      "62% of undecided parents stall for 48+ hours after the diagnostic debrief call without a written summary.",
+    courseCodesTargeted: ["MHF4U", "MCR3U", "SBI3U", "SCH4U"],
+    assignedAgentId: "agent-lifecycle",
+    skillName: "copywriting",
+    targetPlatform: "Email",
+    funnelObjective: "Conversion Optimization",
+    targetKpi: "Recover ≥ 20% of undecided post-diagnostic parents within 72 hours",
+    status: "Queued",
+    requiredStage: "STAGE_1",
+  },
+  {
+    id: "act-t3-monthly-flag-a",
+    tier_id: "TIER_3",
+    horizon: "Monthly",
+    timeWindow: "This Month · Tier 2 → Tier 3 Prime 1:1 Upgrade",
+    title:
+      "Pre-Midterm 'Flag A Cognitive Overload' 1:1 Educator Consultation Invite ($399/mo Base | $649/mo Intensive)",
+    tacticalExecution:
+      "1. Who receives this: Tier 2 Grade 11–12 families whose student stalled on 3+ consecutive Level 4 Thinking & Application problems in MHF4U, MCV4U, or SBI4U within 21 days of a major unit exam.\n2. Step-by-step action: Schedule a private 15-minute syllabus review showing a custom 6-week exam prep calendar.\n3. Closing offer: Upgrade to Tier 3 Prime 1:1 ($399/mo for 4 × 60-minute live 1:1 sessions/month, or $649/mo Intensive for 8 × 60-minute sessions/month, with the tutor-integrated monthly 25–30 minute parent briefing).",
+    deliverableSpec:
+      "1:1 Parent Consultation Script & 6-Week MHF4U/MCV4U Syllabus Roadmap Outline",
+    marketTrigger:
+      "Ontario midterm report cards and OUAC university admissions windows drive high demand for live 1:1 specialist tutoring.",
+    courseCodesTargeted: ["MHF4U", "MCV4U", "SBI4U", "SCH4U"],
+    assignedAgentId: "agent-lifecycle",
+    skillName: "copywriting",
+    targetPlatform: "1:1 Consultation & Upgrade Script",
+    funnelObjective: "Parent Retention & Referral",
+    targetKpi: "Close ≥ 40% of Flag A consultations into Tier 3 Prime ($399/$649)",
+    status: "Queued",
+    requiredStage: "STAGE_1",
+  },
+  {
+    id: "act-t1-quarterly-checklists",
+    tier_id: "TIER_1",
+    horizon: "Quarterly",
+    timeWindow: "90-Day Semester Milestone · Organic Lead Loop",
+    title:
+      "Ontario Unit-Test Formula & K/T/C/A Trap Checklists (MPM2D · MCR3U · MHF4U · SBI3U)",
+    tacticalExecution:
+      "1. Target audience: Ontario Grade 10–12 students searching for unit-test review sheets before midterm and final exams.\n2. Step-by-step action: Publish downloadable 1-page checklists covering the top 15 Thinking & Application traps per course, with a direct link on each problem to practice it live on MindLC's Socratic Voice + LaTeX HUD.\n3. Closing offer: Free 10-minute interactive diagnostic + +$19/mo sibling self-coach pass.",
+    deliverableSpec:
+      "Course-Code Landing Page & Interactive Unit-Test Checklist Copy",
+    marketTrigger:
+      "Build low-CAC organic lead flow (≥ 200 leads/month) ahead of Stage 2 expansion.",
+    courseCodesTargeted: ["MPM2D", "MCR3U", "MHF4U", "SBI3U"],
+    assignedAgentId: "agent-seo",
+    skillName: "ai-seo",
+    targetPlatform: "Community",
+    funnelObjective: "Lead Generation",
+    targetKpi: "Generate ≥ 200 organic student leads/month with ≥ 20% starting a free diagnostic",
+    status: "Queued",
+    requiredStage: "STAGE_2",
+  },
+  {
+    id: "act-all-annual-roadmap",
+    tier_id: "TIER_2",
+    horizon: "Annual",
+    timeWindow: "Full Ontario Academic Year (4-Peak Calendar)",
+    title:
+      "Annual 4-Peak Ontario Semester & Exam Window Campaign Playbook (Sep · Nov · Jan · Apr/Jun)",
+    tacticalExecution:
+      "1. Peak 1 (September Back-to-School): Promote 5-Month Semester Passes ($165 T1 / $590 T2 / $1,795 T3) to lock full-semester retention.\n2. Peak 2 (November Sem 1 Midterms) & Peak 3 (January Finals + Sem 2 Start): Run 10-minute K/T/C/A diagnostic rescue debriefs for Tier 2 ($139/mo) and Flag A upgrades into Tier 3 Prime ($399/$649/mo).\n3. Peak 4 (April–June Sem 2 Midterms, EQAO & OUAC Cutoffs): Scale validated GTA parent referral loops and Grade 12 exam-season intensives.",
+    deliverableSpec:
+      "Annual 4-Peak Campaign Schedule & Tier-by-Tier Offer Allocation Guide",
+    marketTrigger:
+      "Aligns all marketing spend and Learning Manager hiring milestones (part-time at 25 students, full-time lead at 120 students) with the Ontario Ministry academic calendar.",
+    courseCodesTargeted: ["MTH1W", "MPM2D", "MCR3U", "MHF4U", "MCV4U", "SBI3U"],
+    assignedAgentId: "agent-intel",
+    skillName: "cro",
+    targetPlatform: "Email",
+    funnelObjective: "Parent Retention & Referral",
+    targetKpi: "Reach Combined Stage 3 Milestone: 430 Paid Students ($37,570/mo MRR · $450,840 ARR)",
     status: "Queued",
     requiredStage: "STAGE_1",
   },
@@ -3305,15 +3456,15 @@ export const useMarketingStore = create<MarketingState>((set, get) => {
         horizon: "Daily",
         timeWindow: `Today · ${ws.tier_short_name} (${ws.active_stage})`,
         title: `[${ws.tier_short_name}] Counter ${comp.name}: "${comp.recommendedConversionPlay.slice(0, 58)}"`,
-        tacticalExecution: `Target Ontario parents comparing ${comp.name} against ${ws.tier_name}.`,
-        deliverableSpec: `Comparison Battlecard vs. ${comp.name}`,
+        tacticalExecution: `1. Target Families: Ontario parents currently comparing ${comp.name} (${comp.pricingModel}) against ${ws.tier_name}.\n2. Key Counter-Message: Address their frustration (${comp.ontarioParentComplaint}) by contrasting ${comp.name}'s gap (${comp.structuralWeakness}) with ${comp.mindlcCounterWedge}.\n3. Closing Offer: ${comp.recommendedConversionPlay}`,
+        deliverableSpec: `Parent Comparison Battlecard & Debrief Talking Points vs. ${comp.name}`,
         marketTrigger: `Competitor gap identified in ${comp.name}`,
         courseCodesTargeted: ["MHF4U", "SBI3U", "MCR3U", "MPM2D"],
         assignedAgentId: "agent-cro",
         skillName: "cro",
         targetPlatform: "Parent Call",
         funnelObjective: "Conversion Optimization",
-        targetKpi: `${ws.stage_goals[ws.active_stage].primary_kpi_name} >= ${ws.stage_goals[ws.active_stage].primary_kpi_target_pct}%`,
+        targetKpi: `${ws.stage_goals[ws.active_stage].primary_kpi_name} ≥ ${ws.stage_goals[ws.active_stage].primary_kpi_target_pct}%`,
         status: "Queued",
         adjustedByCmo: true,
         requiredStage: ws.active_stage,
@@ -3344,15 +3495,15 @@ export const useMarketingStore = create<MarketingState>((set, get) => {
         horizon: "Daily",
         timeWindow: `Today · ${ws.tier_short_name} (${ws.active_stage})`,
         title: `[${ws.tier_short_name}] Signal Play: ${trend.title}`,
-        tacticalExecution: `${trend.recommendedCmoAction} Scoped strictly to ${ws.tier_name}.`,
-        deliverableSpec: `${ws.tier_short_name} Proposal for ${trend.courseCodes.join(" · ")}`,
+        tacticalExecution: `1. Target Families: ${trend.affectedGrades} parents facing: "${trend.parentPainSummary}"\n2. Action Steps: ${trend.recommendedCmoAction} Tailor the message specifically for ${ws.tier_name} (${ws.price_label}).\n3. Closing Offer: Invite the parent to complete our ${ws.funnel_labels[2]} and transition into ${ws.funnel_labels[3]}.`,
+        deliverableSpec: `${ws.tier_short_name} Campaign Script & Parent Outreach Copy for ${trend.courseCodes.join(" · ")}`,
         marketTrigger: `${trend.category} (${trend.searchMomentum})`,
         courseCodesTargeted: trend.courseCodes,
         assignedAgentId: "agent-cro",
         skillName: "cro",
         targetPlatform: "Parent Call",
         funnelObjective: "Conversion Optimization",
-        targetKpi: `${ws.stage_goals[ws.active_stage].primary_kpi_name} >= ${ws.stage_goals[ws.active_stage].primary_kpi_target_pct}%`,
+        targetKpi: `${ws.stage_goals[ws.active_stage].primary_kpi_name} ≥ ${ws.stage_goals[ws.active_stage].primary_kpi_target_pct}%`,
         status: "Queued",
         adjustedByCmo: true,
         requiredStage: ws.active_stage,
@@ -3369,14 +3520,15 @@ export const useMarketingStore = create<MarketingState>((set, get) => {
 
     dispatchAgentForActivity: async (activityId: string) => {
       const state = get();
-      const tierId = state.activeTierId;
+      const activity = state.plannedActivities.find((a) => a.id === activityId);
+      if (!activity) return;
+
+      const tierId: TierId = activity.tier_id || state.activeTierId;
       const ws = state.tierWorkspaces[tierId];
       if (ws.reality_gate_status === "LOCKED") {
         set({ isRealityGateModalOpen: true });
         return;
       }
-      const activity = state.plannedActivities.find((a) => a.id === activityId);
-      if (!activity) return;
 
       const agent =
         state.agents.find((ag) => ag.id === activity.assignedAgentId) ||
@@ -3440,10 +3592,16 @@ export const useMarketingStore = create<MarketingState>((set, get) => {
           proposals: [newAsset, ...curWs.proposals],
           selected_proposal_id: newAssetId,
         };
+        const nextWorkspaces = {
+          ...prev.tierWorkspaces,
+          [tierId]: updatedWs,
+        };
         return {
           runningActivityId: null,
-          tierWorkspaces: { ...prev.tierWorkspaces, [tierId]: updatedWs },
-          ...syncMirrorsFromTier(updatedWs),
+          tierWorkspaces: nextWorkspaces,
+          ...(tierId === prev.activeTierId
+            ? syncMirrorsFromTier(updatedWs)
+            : {}),
           lastHighlightedAssetId: newAssetId,
           plannedActivities: prev.plannedActivities.map((a) =>
             a.id === activityId

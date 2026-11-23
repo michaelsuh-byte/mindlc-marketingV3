@@ -43,43 +43,57 @@ const STAGE_ORDER: StageId[] = ["STAGE_1", "STAGE_2", "STAGE_3"];
 
 const TOP_NAV_TABS: {
   id: NavigationTab;
+  stepNum: string;
   label: string;
+  workflowHint: string;
   icon: React.ComponentType<{ className?: string }>;
   iconColor: string;
 }[] = [
   {
+    id: "intel",
+    stepNum: "1",
+    label: "Market & Competitors",
+    workflowHint: "Step 1 · Monitor Ontario trends & scan competitors",
+    icon: Radar,
+    iconColor: "text-sky-600",
+  },
+  {
+    id: "planner",
+    stepNum: "2",
+    label: "CMO Planner",
+    workflowHint: "Step 2 · Plan horizons & dispatch specialist agents",
+    icon: CalendarClock,
+    iconColor: "text-teal-600",
+  },
+  {
     id: "copilot",
+    stepNum: "3",
     label: "Campaigns & Tiers",
+    workflowHint: "Step 3 · Refine drafts with AI & approve for launch",
     icon: Layers,
     iconColor: "text-indigo-600",
   },
   {
     id: "closing",
+    stepNum: "4",
     label: "Closing & Analytics",
+    workflowHint: "Step 4 · Log monthly ledger, unit economics & close period",
     icon: BarChart3,
     iconColor: "text-emerald-600",
   },
   {
-    id: "planner",
-    label: "CMO Planner",
-    icon: CalendarClock,
-    iconColor: "text-teal-600",
-  },
-  {
-    id: "intel",
-    label: "Market & Competitors",
-    icon: Radar,
-    iconColor: "text-sky-600",
-  },
-  {
     id: "skills",
+    stepNum: "5",
     label: "Playbook Skills",
+    workflowHint: "Step 5 · Customize AI marketing frameworks",
     icon: BookOpen,
     iconColor: "text-amber-600",
   },
   {
     id: "settings",
+    stepNum: "6",
     label: "Brand Guardrails",
+    workflowHint: "Step 6 · Configure tier positioning & tone boundaries",
     icon: ShieldCheck,
     iconColor: "text-purple-600",
   },
@@ -320,22 +334,38 @@ export function SafeguardTopBar() {
             aria-label="Primary Platform Navigation"
             className="flex items-center flex-wrap gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/80"
           >
-            {TOP_NAV_TABS.map((tab) => {
+            {TOP_NAV_TABS.map((tab, idx) => {
               const IconComp = tab.icon;
               const isSelected = activeTab === tab.id;
               return (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                    isSelected
-                      ? "bg-white text-slate-900 shadow-2xs border border-slate-200/80 font-semibold"
-                      : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
-                  }`}
-                >
-                  <IconComp className={`w-3.5 h-3.5 ${tab.iconColor}`} />
-                  <span>{tab.label}</span>
-                </button>
+                <React.Fragment key={tab.id}>
+                  <button
+                    onClick={() => setActiveTab(tab.id)}
+                    title={tab.workflowHint}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      isSelected
+                        ? "bg-white text-slate-900 shadow-2xs border border-slate-200/80 font-semibold"
+                        : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
+                    }`}
+                  >
+                    <span
+                      className={`w-4 h-4 rounded-full text-[10px] font-mono flex items-center justify-center ${
+                        isSelected
+                          ? "bg-slate-900 text-white font-bold"
+                          : "bg-slate-200/80 text-slate-600"
+                      }`}
+                    >
+                      {tab.stepNum}
+                    </span>
+                    <IconComp className={`w-3.5 h-3.5 ${tab.iconColor}`} />
+                    <span>{tab.label}</span>
+                  </button>
+                  {idx < 3 && (
+                    <span className="text-slate-300 text-xs select-none hidden md:inline">
+                      →
+                    </span>
+                  )}
+                </React.Fragment>
               );
             })}
           </nav>
