@@ -5,6 +5,7 @@ import { useMarketingStore } from "@/store/useMarketingStore";
 import {
   aggregateMonthlyPerformancePeriod,
   computeCombined3TierBenchmarks,
+  computeTierUnitEconomics,
   getReportingPeriodOptions,
 } from "@/services/marketingAi";
 import { stripMarkdownToCleanText } from "@/components/ChannelAwareDraftRenderer";
@@ -14,23 +15,33 @@ import {
   Download,
   Edit3,
   Sparkles,
-  CheckCircle2,
-  AlertTriangle,
   Info,
   RefreshCw,
   Lock,
   RotateCcw,
   Trash2,
   X,
-  TrendingUp,
   Users,
-  DollarSign,
-  ShieldCheck,
+  Plus,
+  Sliders,
 } from "lucide-react";
 
 type ClosingSubTab = "revenue_tier" | "kpi_scorecard" | "ai_memo_plan";
 
 const TIER_ORDER: TierId[] = ["TIER_1", "TIER_2", "TIER_3"];
+
+// Generate extended selectable calendar months from 2026-09 through 2030-12
+function generateExtendedMonthOptions(maxYear: number): string[] {
+  const list: string[] = [];
+  const endYr = Math.max(2028, maxYear + 1);
+  for (let yr = 2026; yr <= endYr; yr++) {
+    const startMo = yr === 2026 ? 9 : 1;
+    for (let mo = startMo; mo <= 12; mo++) {
+      list.push(`${yr}-${String(mo).padStart(2, "0")}`);
+    }
+  }
+  return list;
+}
 
 export function ClosingAnalyticsView() {
   const {
@@ -39,12 +50,20 @@ export function ClosingAnalyticsView() {
     calendarReportingMode,
     selectedReportingPeriodId,
     fiscalYearStartMonth,
+    unitEconomicsCosts,
+    maxAcademicStartYear,
     isSampleSeedActive,
     diagnosticToast,
     clearDiagnosticToast,
     setCalendarReportingMode,
     setSelectedReportingPeriodId,
     setFiscalYearStartMonth,
+    setMaxAcademicStartYear,
+    ensureMonthlyPerformanceRecordExists,
+    updateUnitEconomicsCosts,
+    updateTierPricingConfig,
+    addPromoCohortToMonthlyRecord,
+    removePromoCohortFromMonthlyRecord,
     updateMonthlyPerformanceTierRecord,
     updateMonthlyMarketingSpend,
     updateMonthlyClosingNotes,
@@ -63,10 +82,21 @@ export function ClosingAnalyticsView() {
     "actuals"
   );
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [isEditingUnitEconomics, setIsEditingUnitEconomics] = useState(false);
+
+  // Promotional / Multi-Month Cohort Sale form inside Log Monthly Data Modal
+  const [promoTierId, setPromoTierId] = useState<TierId>("TIER_2");
+  const [promoLabel, setPromoLabel] = useState<string>(
+    "Pilot Early-Bird Promo"
+  );
+  const [promoAccountsSold, setPromoAccountsSold] = useState<number>(2);
+  const [promoMonthsDuration, setPromoMonthsDuration] = useState<number>(3);
+  const [promoTotalPriceCad, setPromoTotalPriceCad] = useState<number>(297);
 
   const periodOptions = getReportingPeriodOptions(
     calendarReportingMode,
-    fiscalYearStartMonth
+    fiscalYearStartMonth,
+    maxAcademicStartYear
   );
   const activePeriodOption =
     periodOptions.find((p) => p.id === selectedReportingPeriodId) ||
@@ -77,7 +107,16 @@ export function ClosingAnalyticsView() {
     activePeriodOption?.monthIds || ["2026-09", "2026-10", "2026-11"]
   );
 
-  const combinedBenchmarks = computeCombined3TierBenchmarks(tierWorkspaces);
+  const unitEconomics = computeTierUnitEconomics(
+    tierWorkspaces,
+    unitEconomicsCosts
+  );
+  const combinedBenchmarks = computeCombined3TierBenchmarks(
+    tierWorkspaces,
+    unitEconomicsCosts
+  );
+
+  const extendedMonthList = generateExtendedMonthOptions(maxAcademicStartYear);
 
   const activeEditingRecord =
     monthlyPerformanceRecords.find((r) => r.month_id === editingMonthId) ||
@@ -89,6 +128,23 @@ export function ClosingAnalyticsView() {
       .slice(-1)[0] ||
     monthlyPerformanceRecords[monthlyPerformanceRecords.length - 1];
 
+  const handleSelectEditingMonth = (nextMonthId: string) => {
+    ensureMonthlyPerformanceRecordExists(nextMonthId);
+    setEditingMonthId(nextMonthId);
+  };
+
+  const handleAddPromoCohort = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (promoAccountsSold <= 0 || promoMonthsDuration <= 0) return;
+    ensureMonthlyPerformanceRecordExists(editingMonthId);
+    addPromoCohortToMonthlyRecord(editingMonthId, editingSide, promoTierId, {
+      promo_label: promoLabel.trim() || "Promotional Cohort",
+      accounts_sold: Number(promoAccountsSold) || 1,
+      months_duration: Math.max(1, Number(promoMonthsDuration) || 1),
+      total_price_per_account_cad: Number(promoTotalPriceCad) || 0,
+    });
+  };
+
   // Export JSON or CSV for Finance & Accounting App interoperability
   const handleExportLedger = (format: "json" | "csv") => {
     setShowExportMenu(false);
@@ -98,6 +154,7 @@ export function ClosingAnalyticsView() {
         reporting_mode: calendarReportingMode,
         period_id: activePeriodOption?.id,
         fiscal_year_start_month: fiscalYearStartMonth,
+        unit_economics_assumptions: unitEconomicsCosts,
         monthly_records: monthlyPerformanceRecords,
         aggregated_period_kpis: rollup,
       };
@@ -107,18 +164,21 @@ export function ClosingAnalyticsView() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `mindlc-monthly-ledger-${activePeriodOption?.id || "all"}.json`;
+      a.download = `mindlc-monthly-ledger-${
+        activePeriodOption?.id || "all"
+      }.json`;
       a.click();
       URL.revokeObjectURL(url);
       return;
     }
 
-    // CSV Export
     const headers = [
       "month_id",
       "status",
       "tier_id",
       "unit_price_cad",
+      "discounted_promo_price_cad",
+      "discounted_accounts_count",
       "tier3_intensive_addon_count",
       "starting_paid_students",
       "new_leads",
@@ -145,6 +205,8 @@ export function ClosingAnalyticsView() {
             rec.status,
             tid,
             act.unit_price_cad,
+            act.discounted_promo_price_cad ?? act.unit_price_cad,
+            act.discounted_accounts_count || 0,
             act.tier3_intensive_addon_count || 0,
             act.starting_paid_students,
             act.new_leads,
@@ -183,20 +245,18 @@ export function ClosingAnalyticsView() {
     return "bg-rose-50 text-rose-800 border-rose-200";
   };
 
-  // Max value for clean stacked bar chart scaling
   const maxBarRevenue = Math.max(
     1,
     rollup.targetKpis.recognizedRevenueCad,
     rollup.actualKpis.recognizedRevenueCad
   );
 
-  // 10 Standard Marketing KPIs + MER Table Definition
   const kpiScorecardRows = [
     {
       id: "kpi-1",
       name: "1. Period Recognized Revenue (CAD)",
       formulaTooltip:
-        "Sum of monthly earned revenue across all months in period (includes amortized 5-mo Semester Passes and Tier 3 +$250/mo 8×60-min add-ons).",
+        "Sum of monthly earned revenue across all months in period (includes amortized multi-month cohorts, 5-mo Semester Passes, and Tier 3 +$250/mo 8×60-min add-ons).",
       targetStr: `$${rollup.targetKpis.recognizedRevenueCad.toLocaleString()} CAD`,
       actualStr: `$${rollup.actualKpis.recognizedRevenueCad.toLocaleString()} CAD (Cash: $${rollup.actualKpis.cashCollectedCad.toLocaleString()} · End MRR: $${rollup.actualKpis.endingMrrCad.toLocaleString()})`,
       varianceStr: `${
@@ -219,7 +279,7 @@ export function ClosingAnalyticsView() {
       id: "kpi-2",
       name: "2. Blended ARPA (Average Revenue Per Account)",
       formulaTooltip:
-        "Ending Monthly Recognized Revenue (MRR) ÷ Ending Paid Students across Tier 1 ($39), Tier 2 ($139), and Tier 3 ($399/$649).",
+        "Ending Monthly Recognized Revenue (MRR) ÷ Ending Paid Students across Tier 1, Tier 2, and Tier 3.",
       targetStr: `$${rollup.targetKpis.blendedArpaCad.toFixed(2)} /mo`,
       actualStr: `$${rollup.actualKpis.blendedArpaCad.toFixed(2)} /mo`,
       varianceStr: `${
@@ -283,7 +343,8 @@ export function ClosingAnalyticsView() {
       status:
         rollup.actualKpis.blendedCacCad !== null &&
         rollup.targetKpis.blendedCacCad !== null &&
-        rollup.actualKpis.blendedCacCad <= rollup.targetKpis.blendedCacCad * 1.15
+        rollup.actualKpis.blendedCacCad <=
+          rollup.targetKpis.blendedCacCad * 1.15
           ? "green"
           : "amber",
     },
@@ -376,7 +437,7 @@ export function ClosingAnalyticsView() {
       id: "kpi-10",
       name: "10. LTV : CAC Ratio & CAC Payback (Months)",
       formulaTooltip:
-        "LTV = Blended ARPA ÷ Monthly Churn Rate (conservatively capped at 10 months / 2 Ontario semesters if churn is 0%). Payback = Blended CAC ÷ Blended ARPA.",
+        "LTV = Blended ARPA ÷ Monthly Churn Rate (capped at 10 months / 2 Ontario semesters if churn is 0%). Payback = Blended CAC ÷ Blended ARPA.",
       targetStr:
         rollup.targetKpis.ltvToCacRatio !== null
           ? `${rollup.targetKpis.ltvToCacRatio}x (${rollup.targetKpis.cacPaybackMonths} mo payback)`
@@ -426,14 +487,15 @@ export function ClosingAnalyticsView() {
   ];
 
   return (
-    <div className="min-h-[calc(100vh-56px)] bg-slate-50/70 pb-20">
+    <div className="min-h-full bg-slate-50/70 pb-20">
       {/* =================================================================== */}
-      {/* 1. CONTROL STRIP (Calendar View Toggle + Period Dropdown + Actions) */}
+      {/* 1. CONTROL STRIP (Sticky at top-0 of the scrollable main pane       */}
+      {/*    so top lines of panels are NEVER hidden behind the top bar!)     */}
       {/* =================================================================== */}
-      <div className="bg-white border-b border-slate-200 px-6 py-3.5 sticky top-[56px] z-20">
+      <div className="bg-white border-b border-slate-200 px-6 py-3.5 sticky top-0 z-20 shadow-2xs">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
-          {/* Left: Calendar View Toggle + Period Dropdown + Status Badge */}
-          <div className="flex flex-wrap items-center gap-2.5">
+          {/* Left: Calendar View Toggle + Period Dropdown + Horizon Extension + Status Badge */}
+          <div className="flex flex-wrap items-center gap-2">
             <div className="inline-flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
               {(
                 [
@@ -460,9 +522,7 @@ export function ClosingAnalyticsView() {
               <select
                 value={fiscalYearStartMonth}
                 onChange={(e) =>
-                  setFiscalYearStartMonth(
-                    Number(e.target.value) === 9 ? 9 : 1
-                  )
+                  setFiscalYearStartMonth(Number(e.target.value) === 9 ? 9 : 1)
                 }
                 className="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-slate-50 text-slate-700 font-medium"
                 title="Configurable Fiscal Year Start Month"
@@ -472,9 +532,9 @@ export function ClosingAnalyticsView() {
               </select>
             )}
 
-            {/* Period Selector Dropdown */}
+            {/* Period Selector Dropdown (Multi-Year 2026 through maxAcademicStartYear+1) */}
             <div className="inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-3 py-1.5">
-              <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+              <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
               <select
                 value={activePeriodOption?.id || ""}
                 onChange={(e) => setSelectedReportingPeriodId(e.target.value)}
@@ -483,6 +543,25 @@ export function ClosingAnalyticsView() {
                 {periodOptions.map((opt) => (
                   <option key={opt.id} value={opt.id}>
                     {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Adjustable Horizon Year Selector (Extendable Beyond 2027 up to 2035) */}
+            <div className="inline-flex items-center gap-1 bg-slate-100 border border-slate-200 rounded-xl px-2.5 py-1 text-xs">
+              <span className="text-slate-500 text-[11px]">Horizon:</span>
+              <select
+                value={maxAcademicStartYear}
+                onChange={(e) =>
+                  setMaxAcademicStartYear(parseInt(e.target.value, 10) || 2029)
+                }
+                className="font-mono font-semibold text-slate-800 bg-transparent focus:outline-none"
+                title="Extend selectable academic and fiscal periods up to 2035"
+              >
+                {[2027, 2028, 2029, 2030, 2031, 2032, 2035].map((yr) => (
+                  <option key={yr} value={yr}>
+                    Through {yr + 1}
                   </option>
                 ))}
               </select>
@@ -512,7 +591,13 @@ export function ClosingAnalyticsView() {
           {/* Right: Action Buttons ([✏️ Log Monthly Data], [✨ AI Period Review], [⬇️ Export Ledger], Sample Data Reset) */}
           <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={() => setIsLogModalOpen(true)}
+              onClick={() => {
+                const defaultMo =
+                  activePeriodOption?.monthIds[0] || editingMonthId;
+                ensureMonthlyPerformanceRecordExists(defaultMo);
+                setEditingMonthId(defaultMo);
+                setIsLogModalOpen(true);
+              }}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-2xs transition-colors"
             >
               <Edit3 className="w-3.5 h-3.5" />
@@ -536,7 +621,7 @@ export function ClosingAnalyticsView() {
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 transition-colors"
               >
                 <Download className="w-3.5 h-3.5 text-slate-500" />
-                <span>Export Monthly Ledger</span>
+                <span>Export Ledger</span>
               </button>
 
               {showExportMenu && (
@@ -563,12 +648,12 @@ export function ClosingAnalyticsView() {
               )}
             </div>
 
-            {/* Sample Data Reset / Restore Button (Section 5) */}
+            {/* Sample Data Reset / Restore Button */}
             {isSampleSeedActive ? (
               <button
                 onClick={clearSampleDataAndReset}
                 className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[11px] font-medium text-rose-700 bg-rose-50/70 hover:bg-rose-100 border border-rose-200 transition-colors"
-                title="Clear sample data seed (2026-09, 2026-10, 2026-11) to test zero-division safety and live inputs"
+                title="Clear sample data seed (2026-09, 2026-10, 2026-11)"
               >
                 <Trash2 className="w-3 h-3" />
                 <span>Clear Sample Data</span>
@@ -603,12 +688,12 @@ export function ClosingAnalyticsView() {
 
       <div className="max-w-7xl mx-auto px-6 pt-6 space-y-6">
         {/* ================================================================= */}
-        {/* 2. EXECUTIVE SUMMARY STRIP (4 Clean KPI Cards Only)               */}
+        {/* 2. EXECUTIVE SUMMARY STRIP (4 KPI Cards)                          */}
         {/* ================================================================= */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {/* Card 1: Period Gross Revenue */}
           <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs space-y-2">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-semibold text-slate-500">
                 1. Period Recognized Revenue
               </span>
@@ -646,7 +731,7 @@ export function ClosingAnalyticsView() {
 
           {/* Card 2: Ending Paid Students */}
           <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs space-y-2">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-semibold text-slate-500">
                 2. Ending Paid Students
               </span>
@@ -668,10 +753,12 @@ export function ClosingAnalyticsView() {
             </div>
             <div className="pt-1 border-t border-slate-100 flex items-center justify-between text-[11px] font-mono text-slate-600">
               <span>
-                T1: <strong>{rollup.byTierActual.TIER_1.ending_paid_students}</strong>
+                T1:{" "}
+                <strong>{rollup.byTierActual.TIER_1.ending_paid_students}</strong>
               </span>
               <span>
-                T2: <strong>{rollup.byTierActual.TIER_2.ending_paid_students}</strong>
+                T2:{" "}
+                <strong>{rollup.byTierActual.TIER_2.ending_paid_students}</strong>
               </span>
               <span>
                 T3:{" "}
@@ -685,7 +772,7 @@ export function ClosingAnalyticsView() {
 
           {/* Card 3: Acquisition Efficiency (Blended CAC + MER) */}
           <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs space-y-2">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-semibold text-slate-500">
                 3. Acquisition Efficiency
               </span>
@@ -722,7 +809,7 @@ export function ClosingAnalyticsView() {
 
           {/* Card 4: Retention & Unit Health (Monthly Churn % + LTV : CAC) */}
           <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs space-y-2">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-semibold text-slate-500">
                 4. Retention &amp; Unit Health
               </span>
@@ -759,7 +846,7 @@ export function ClosingAnalyticsView() {
         </div>
 
         {/* ================================================================= */}
-        {/* 3. THREE CLICK-TO-SWITCH SUB-TABS (Prevent Visual Clutter)        */}
+        {/* 3. THREE CLICK-TO-SWITCH SUB-TABS                                 */}
         {/* ================================================================= */}
         <div className="flex items-center justify-between border-b border-slate-200 pb-3">
           <div className="inline-flex items-center bg-slate-200/70 p-1 rounded-xl border border-slate-200">
@@ -771,7 +858,7 @@ export function ClosingAnalyticsView() {
                   : "text-slate-600 hover:text-slate-900"
               }`}
             >
-              A. Revenue &amp; Tier Breakdown (+ Unit Economics)
+              A. Revenue &amp; Tier Breakdown (+ Adjustable Unit Economics)
             </button>
             <button
               onClick={() => setActiveSubTab("kpi_scorecard")}
@@ -797,7 +884,7 @@ export function ClosingAnalyticsView() {
         </div>
 
         {/* ================================================================= */}
-        {/* SUB-TAB A: REVENUE & TIER BREAKDOWN + 1 STACKED BAR CHART         */}
+        {/* SUB-TAB A: REVENUE & TIER BREAKDOWN + ADJUSTABLE UNIT ECONOMICS   */}
         {/* ================================================================= */}
         {activeSubTab === "revenue_tier" && (
           <div className="space-y-6">
@@ -810,8 +897,8 @@ export function ClosingAnalyticsView() {
                       Period Revenue &amp; Student Variance by Tier (CAD)
                     </h3>
                     <p className="text-xs text-slate-500">
-                      Separates Cash Collected (5-mo upfront passes) from
-                      Recognized Monthly Revenue
+                      Separates Cash Collected (multi-month &amp; 5-mo upfront
+                      passes) from Recognized Monthly Revenue
                     </p>
                   </div>
                   <span className="text-xs font-mono text-slate-500">
@@ -933,14 +1020,14 @@ export function ClosingAnalyticsView() {
                 </div>
               </div>
 
-              {/* ONE Clean Stacked Bar Chart Comparing Target vs Actual Revenue by Tier */}
+              {/* Stacked Bar Chart Comparing Target vs Actual Revenue by Tier */}
               <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs flex flex-col justify-between space-y-4">
                 <div>
                   <h3 className="text-sm font-semibold text-slate-900">
                     Target vs. Actual Revenue by Tier
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Visual stacked comparison for {activePeriodOption?.label}
+                    Stacked comparison for {activePeriodOption?.label}
                   </p>
                 </div>
 
@@ -1048,38 +1135,175 @@ export function ClosingAnalyticsView() {
                 <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600">
                   <span className="inline-flex items-center gap-1.5">
                     <span className="w-2.5 h-2.5 rounded-xs bg-sky-500" />
-                    Tier 1 ($39)
+                    Tier 1 (${tierWorkspaces.TIER_1.pricing_config.base_monthly_cad})
                   </span>
                   <span className="inline-flex items-center gap-1.5">
                     <span className="w-2.5 h-2.5 rounded-xs bg-indigo-600" />
-                    Tier 2 ($139)
+                    Tier 2 (${tierWorkspaces.TIER_2.pricing_config.base_monthly_cad})
                   </span>
                   <span className="inline-flex items-center gap-1.5">
                     <span className="w-2.5 h-2.5 rounded-xs bg-emerald-600" />
-                    Tier 3 ($399 / $649)
+                    Tier 3 (${tierWorkspaces.TIER_3.pricing_config.base_monthly_cad} / $
+                    {tierWorkspaces.TIER_3.pricing_config.base_monthly_cad +
+                      (tierWorkspaces.TIER_3.pricing_config
+                        .intensive_addon_monthly_cad || 250)}
+                    )
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* Unit Economics & Contribution Margin Reference Table (From Google Docs Team Pricing Proposal) */}
+            {/* ADJUSTABLE UNIT ECONOMICS & MONTHLY CONTRIBUTION MARGIN TABLE */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
-              <div className="px-5 py-3.5 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center justify-between gap-2">
+              <div className="px-5 py-3.5 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h3 className="text-sm font-semibold text-slate-900">
                     Approved Unit Economics &amp; Monthly Contribution Margin per
                     Student (CAD)
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Includes AI API ($9.00), Stripe (2.9% + $0.30), Learning
-                    Manager ($26/hr + 12% load = $29.12/hr), and Online STEM
-                    Tutor ($40/hr + 12% load = $44.80/hr)
+                    Directly adjust AI API, Stripe %/fixed fee, Learning Manager
+                    hourly load, or Tutor hourly rate below to model future cost
+                    changes.
                   </p>
                 </div>
-                <span className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-emerald-50 text-emerald-800 border border-emerald-200">
-                  25–30 Min Monthly Briefing (25m Avg vs. 30m Max Sensitivity)
-                </span>
+
+                <button
+                  type="button"
+                  onClick={() => setIsEditingUnitEconomics((prev) => !prev)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-colors ${
+                    isEditingUnitEconomics
+                      ? "bg-indigo-600 text-white border-indigo-600"
+                      : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
+                  }`}
+                >
+                  <Sliders className="w-3.5 h-3.5" />
+                  <span>
+                    {isEditingUnitEconomics
+                      ? "Done Adjusting Unit Costs"
+                      : "Adjust Unit Cost Assumptions"}
+                  </span>
+                </button>
               </div>
+
+              {/* Editable Cost Assumptions Bar (Revealed when clicking Adjust Unit Cost Assumptions) */}
+              {isEditingUnitEconomics && (
+                <div className="p-4 bg-indigo-50/50 border-b border-indigo-100 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-xs">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600">
+                      AI API / Student ($/mo)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.25"
+                      min={0}
+                      value={unitEconomicsCosts.ai_api_cost_per_student_cad}
+                      onChange={(e) =>
+                        updateUnitEconomicsCosts({
+                          ai_api_cost_per_student_cad:
+                            parseFloat(e.target.value || "0") || 0,
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600">
+                      Stripe Fee (%)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min={0}
+                      value={unitEconomicsCosts.stripe_fee_pct}
+                      onChange={(e) =>
+                        updateUnitEconomicsCosts({
+                          stripe_fee_pct:
+                            parseFloat(e.target.value || "0") || 0,
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600">
+                      Stripe Fixed ($/txn)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min={0}
+                      value={unitEconomicsCosts.stripe_fixed_fee_cad}
+                      onChange={(e) =>
+                        updateUnitEconomicsCosts({
+                          stripe_fixed_fee_cad:
+                            parseFloat(e.target.value || "0") || 0,
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600">
+                      Manager Loaded ($/hr)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min={0}
+                      value={unitEconomicsCosts.manager_hourly_loaded_cad}
+                      onChange={(e) =>
+                        updateUnitEconomicsCosts({
+                          manager_hourly_loaded_cad:
+                            parseFloat(e.target.value || "0") || 0,
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600">
+                      T2 Manager Mins/Mo
+                    </label>
+                    <input
+                      type="number"
+                      step="5"
+                      min={0}
+                      value={unitEconomicsCosts.tier2_manager_mins_avg}
+                      onChange={(e) =>
+                        updateUnitEconomicsCosts({
+                          tier2_manager_mins_avg:
+                            parseFloat(e.target.value || "0") || 0,
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600">
+                      Tutor Loaded ($/hr)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min={0}
+                      value={unitEconomicsCosts.tutor_hourly_loaded_cad}
+                      onChange={(e) =>
+                        updateUnitEconomicsCosts({
+                          tutor_hourly_loaded_cad:
+                            parseFloat(e.target.value || "0") || 0,
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 font-mono"
+                    />
+                  </div>
+                </div>
+              )}
 
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse text-xs">
@@ -1096,6 +1320,9 @@ export function ClosingAnalyticsView() {
                       </th>
                       <th className="py-2.5 px-3 text-right">Stripe Fee</th>
                       <th className="py-2.5 px-3 text-right">
+                        Direct Cost Total
+                      </th>
+                      <th className="py-2.5 px-3 text-right">
                         Contribution Margin (25m Avg)
                       </th>
                       <th className="py-2.5 px-3 text-right">
@@ -1104,68 +1331,187 @@ export function ClosingAnalyticsView() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 font-mono">
+                    {/* Tier 1 Row */}
                     <tr>
                       <td className="py-2.5 px-4 font-sans font-semibold text-slate-900">
                         Tier 1 · Online Self-Coach (Automated)
                       </td>
-                      <td className="py-2.5 px-3 text-right">$39.00</td>
-                      <td className="py-2.5 px-3 text-right">$9.00</td>
+                      <td className="py-2.5 px-3 text-right">
+                        {isEditingUnitEconomics ? (
+                          <input
+                            type="number"
+                            min={1}
+                            value={unitEconomics.TIER_1.price}
+                            onChange={(e) =>
+                              updateTierPricingConfig("TIER_1", {
+                                base_monthly_cad:
+                                  parseInt(e.target.value || "1", 10) || 1,
+                              })
+                            }
+                            className="w-16 text-right border border-slate-300 rounded px-1.5 py-0.5 bg-white"
+                          />
+                        ) : (
+                          `$${unitEconomics.TIER_1.price.toFixed(2)}`
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        ${unitEconomics.TIER_1.ai.toFixed(2)}
+                      </td>
                       <td className="py-2.5 px-3 text-right">$0.00</td>
                       <td className="py-2.5 px-3 text-right">$0.00</td>
-                      <td className="py-2.5 px-3 text-right">$1.43</td>
-                      <td className="py-2.5 px-3 text-right font-bold text-emerald-700">
-                        $28.57 (73.3%)
+                      <td className="py-2.5 px-3 text-right">
+                        ${unitEconomics.TIER_1.stripe.toFixed(2)}
                       </td>
                       <td className="py-2.5 px-3 text-right text-slate-600">
-                        $28.57 (73.3%)
+                        ${unitEconomics.TIER_1.directCostAvg25.toFixed(2)}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-bold text-emerald-700">
+                        ${unitEconomics.TIER_1.cmAvg25.toFixed(2)} (
+                        {unitEconomics.TIER_1.cmPctAvg25}%)
+                      </td>
+                      <td className="py-2.5 px-3 text-right text-slate-600">
+                        ${unitEconomics.TIER_1.cmMax30.toFixed(2)} (
+                        {unitEconomics.TIER_1.cmPctMax30}%)
                       </td>
                     </tr>
+
+                    {/* Tier 2 Row */}
                     <tr>
                       <td className="py-2.5 px-4 font-sans font-semibold text-slate-900">
                         Tier 2 · Managed Hybrid (Core Growth Engine)
                       </td>
-                      <td className="py-2.5 px-3 text-right">$139.00</td>
-                      <td className="py-2.5 px-3 text-right">$9.00</td>
-                      <td className="py-2.5 px-3 text-right">$29.12</td>
+                      <td className="py-2.5 px-3 text-right">
+                        {isEditingUnitEconomics ? (
+                          <input
+                            type="number"
+                            min={1}
+                            value={unitEconomics.TIER_2.price}
+                            onChange={(e) =>
+                              updateTierPricingConfig("TIER_2", {
+                                base_monthly_cad:
+                                  parseInt(e.target.value || "1", 10) || 1,
+                              })
+                            }
+                            className="w-16 text-right border border-slate-300 rounded px-1.5 py-0.5 bg-white"
+                          />
+                        ) : (
+                          `$${unitEconomics.TIER_2.price.toFixed(2)}`
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        ${unitEconomics.TIER_2.ai.toFixed(2)}
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        ${unitEconomics.TIER_2.managerOrBriefingAvg25.toFixed(2)}
+                      </td>
                       <td className="py-2.5 px-3 text-right">$0.00</td>
-                      <td className="py-2.5 px-3 text-right">$4.33</td>
-                      <td className="py-2.5 px-3 text-right font-bold text-emerald-700">
-                        $96.55 (69.5%)
+                      <td className="py-2.5 px-3 text-right">
+                        ${unitEconomics.TIER_2.stripe.toFixed(2)}
                       </td>
                       <td className="py-2.5 px-3 text-right text-slate-600">
-                        $94.12 (67.7%)
+                        ${unitEconomics.TIER_2.directCostAvg25.toFixed(2)}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-bold text-emerald-700">
+                        ${unitEconomics.TIER_2.cmAvg25.toFixed(2)} (
+                        {unitEconomics.TIER_2.cmPctAvg25}%)
+                      </td>
+                      <td className="py-2.5 px-3 text-right text-slate-600">
+                        ${unitEconomics.TIER_2.cmMax30.toFixed(2)} (
+                        {unitEconomics.TIER_2.cmPctMax30}%)
                       </td>
                     </tr>
+
+                    {/* Tier 3 Base Row */}
                     <tr>
                       <td className="py-2.5 px-4 font-sans font-semibold text-slate-900">
-                        Tier 3 · Prime 1:1 (4×60m/mo · Tutor-Integrated Briefing)
+                        Tier 3 · Prime 1:1 (
+                        {unitEconomicsCosts.tier3_base_sessions_per_mo}×60m/mo ·
+                        Tutor-Integrated Briefing)
                       </td>
-                      <td className="py-2.5 px-3 text-right">$399.00</td>
-                      <td className="py-2.5 px-3 text-right">$9.00</td>
-                      <td className="py-2.5 px-3 text-right">$18.67</td>
-                      <td className="py-2.5 px-3 text-right">$179.20</td>
-                      <td className="py-2.5 px-3 text-right">$11.87</td>
-                      <td className="py-2.5 px-3 text-right font-bold text-emerald-700">
-                        $180.26 (45.2%)
+                      <td className="py-2.5 px-3 text-right">
+                        {isEditingUnitEconomics ? (
+                          <input
+                            type="number"
+                            min={1}
+                            value={unitEconomics.TIER_3.price}
+                            onChange={(e) =>
+                              updateTierPricingConfig("TIER_3", {
+                                base_monthly_cad:
+                                  parseInt(e.target.value || "1", 10) || 1,
+                              })
+                            }
+                            className="w-16 text-right border border-slate-300 rounded px-1.5 py-0.5 bg-white"
+                          />
+                        ) : (
+                          `$${unitEconomics.TIER_3.price.toFixed(2)}`
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        ${unitEconomics.TIER_3.ai.toFixed(2)}
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        ${unitEconomics.TIER_3.managerOrBriefingAvg25.toFixed(2)}
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        ${unitEconomics.TIER_3.liveTutor.toFixed(2)}
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        ${unitEconomics.TIER_3.stripe.toFixed(2)}
                       </td>
                       <td className="py-2.5 px-3 text-right text-slate-600">
-                        $176.53 (44.2%)
+                        ${unitEconomics.TIER_3.directCostAvg25.toFixed(2)}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-bold text-emerald-700">
+                        ${unitEconomics.TIER_3.cmAvg25.toFixed(2)} (
+                        {unitEconomics.TIER_3.cmPctAvg25}%)
+                      </td>
+                      <td className="py-2.5 px-3 text-right text-slate-600">
+                        ${unitEconomics.TIER_3.cmMax30.toFixed(2)} (
+                        {unitEconomics.TIER_3.cmPctMax30}%)
                       </td>
                     </tr>
+
+                    {/* Tier 3+ Intensive Row */}
                     <tr>
                       <td className="py-2.5 px-4 font-sans font-semibold text-indigo-900">
-                        Tier 3+ Intensive Add-on (8×60m/mo · +$250/mo)
+                        Tier 3+ Intensive Add-on (
+                        {unitEconomicsCosts.tier3_intensive_sessions_per_mo}
+                        ×60m/mo · +$
+                        {tierWorkspaces.TIER_3.pricing_config
+                          .intensive_addon_monthly_cad || 250}
+                        /mo)
                       </td>
-                      <td className="py-2.5 px-3 text-right">$649.00</td>
-                      <td className="py-2.5 px-3 text-right">$9.00</td>
-                      <td className="py-2.5 px-3 text-right">$18.67</td>
-                      <td className="py-2.5 px-3 text-right">$358.40</td>
-                      <td className="py-2.5 px-3 text-right">$19.12</td>
-                      <td className="py-2.5 px-3 text-right font-bold text-indigo-700">
-                        $243.81 (37.6%)
+                      <td className="py-2.5 px-3 text-right">
+                        ${unitEconomics.TIER_3_INTENSIVE.price.toFixed(2)}
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        ${unitEconomics.TIER_3_INTENSIVE.ai.toFixed(2)}
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        $
+                        {unitEconomics.TIER_3_INTENSIVE.managerOrBriefingAvg25.toFixed(
+                          2
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        ${unitEconomics.TIER_3_INTENSIVE.liveTutor.toFixed(2)}
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        ${unitEconomics.TIER_3_INTENSIVE.stripe.toFixed(2)}
                       </td>
                       <td className="py-2.5 px-3 text-right text-slate-600">
-                        $240.08 (37.0%)
+                        $
+                        {unitEconomics.TIER_3_INTENSIVE.directCostAvg25.toFixed(
+                          2
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-bold text-indigo-700">
+                        ${unitEconomics.TIER_3_INTENSIVE.cmAvg25.toFixed(2)} (
+                        {unitEconomics.TIER_3_INTENSIVE.cmPctAvg25}%)
+                      </td>
+                      <td className="py-2.5 px-3 text-right text-slate-600">
+                        ${unitEconomics.TIER_3_INTENSIVE.cmMax30.toFixed(2)} (
+                        {unitEconomics.TIER_3_INTENSIVE.cmPctMax30}%)
                       </td>
                     </tr>
                   </tbody>
@@ -1269,8 +1615,7 @@ export function ClosingAnalyticsView() {
                   <div className="flex items-center gap-2">
                     <Sparkles className="w-4 h-4 text-indigo-600" />
                     <h3 className="text-sm font-semibold text-slate-900">
-                      AI Period Debrief &amp; Funnel Bottleneck Audit (Zero Raw
-                      Markdown)
+                      AI Period Debrief &amp; Funnel Bottleneck Audit
                     </h3>
                   </div>
                   <span className="text-xs font-mono text-slate-400">
@@ -1291,7 +1636,8 @@ export function ClosingAnalyticsView() {
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="text-sm font-semibold text-slate-900">
-                      Acting CMO Closing Notes ({latestPeriodMonthRecord.month_id})
+                      Acting CMO Closing Notes (
+                      {latestPeriodMonthRecord.month_id})
                     </h3>
                     <p className="text-xs text-slate-500">
                       Closing this period locks the month and rolls ending
@@ -1433,7 +1779,8 @@ export function ClosingAnalyticsView() {
       </div>
 
       {/* =================================================================== */}
-      {/* 4. MODAL: [✏️ Log Monthly Data] WITH "SYNC FROM REALITY LOGS"       */}
+      {/* 4. MODAL: [✏️ Log Monthly Data] WITH DISCOUNTED PRICE SECTION &     */}
+      {/*    MULTI-MONTH PROMOTIONAL COHORT RECORDER                          */}
       {/* =================================================================== */}
       {isLogModalOpen && activeEditingRecord && (
         <div
@@ -1441,24 +1788,32 @@ export function ClosingAnalyticsView() {
           onClick={() => setIsLogModalOpen(false)}
         >
           <div
-            className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-5xl w-full overflow-hidden my-8"
+            className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-6xl w-full overflow-hidden my-8"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 <h2 className="text-base font-semibold text-slate-900">
                   Log Monthly Atomic Ledger Data (YYYY-MM)
                 </h2>
                 <select
                   value={editingMonthId}
-                  onChange={(e) => setEditingMonthId(e.target.value)}
+                  onChange={(e) => handleSelectEditingMonth(e.target.value)}
                   className="text-xs font-mono font-semibold border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white"
                 >
-                  {monthlyPerformanceRecords.map((r) => (
-                    <option key={r.month_id} value={r.month_id}>
-                      {r.month_id} · {r.month_label || r.status}
-                    </option>
-                  ))}
+                  {extendedMonthList.map((mId) => {
+                    const existing = monthlyPerformanceRecords.find(
+                      (r) => r.month_id === mId
+                    );
+                    return (
+                      <option key={mId} value={mId}>
+                        {mId}{" "}
+                        {existing
+                          ? `· ${existing.month_label || existing.status}`
+                          : "· (Click to Initialize Month)"}
+                      </option>
+                    );
+                  })}
                 </select>
 
                 <div className="inline-flex bg-slate-200/80 p-0.5 rounded-lg border border-slate-200 text-xs">
@@ -1507,237 +1862,492 @@ export function ClosingAnalyticsView() {
               </div>
             </div>
 
-            <div className="p-6 space-y-6 max-h-[80vh] overflow-y-auto">
-              {/* 3-Tier Student & Revenue Inputs */}
-              <div className="overflow-x-auto rounded-xl border border-slate-200">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-slate-100 text-slate-600 border-b border-slate-200 font-semibold">
-                      <th className="py-2.5 px-3">Tier</th>
-                      <th className="py-2.5 px-2 text-center">Start Paid</th>
-                      <th className="py-2.5 px-2 text-center">New Leads</th>
-                      <th className="py-2.5 px-2 text-center">Diag/Consult</th>
-                      <th className="py-2.5 px-2 text-center">New Paid</th>
-                      <th className="py-2.5 px-2 text-center">Ref/Organic</th>
-                      <th className="py-2.5 px-2 text-center">Upgraded</th>
-                      <th className="py-2.5 px-2 text-center">Churned</th>
-                      <th className="py-2.5 px-2 text-center">5-Mo Pass</th>
-                      <th className="py-2.5 px-2 text-center">
-                        T3 +$250 (8×60m)
-                      </th>
-                      <th className="py-2.5 px-3 text-right">End Paid</th>
-                      <th className="py-2.5 px-3 text-right">
-                        Recognized MRR
-                      </th>
-                      <th className="py-2.5 px-3 text-right">Cash Collected</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200 font-mono">
-                    {TIER_ORDER.map((tid) => {
-                      const rec = activeEditingRecord[editingSide][tid];
-                      const ws = tierWorkspaces[tid];
-                      return (
-                        <tr key={tid}>
-                          <td className="py-3 px-3 font-sans font-semibold text-slate-900">
-                            {ws.tier_short_name} (${rec.unit_price_cad})
-                          </td>
-                          <td className="py-3 px-2 text-center">
-                            <input
-                              type="number"
-                              min={0}
-                              value={rec.starting_paid_students}
-                              onChange={(e) =>
-                                updateMonthlyPerformanceTierRecord(
-                                  editingMonthId,
-                                  editingSide,
-                                  tid,
-                                  {
-                                    starting_paid_students:
-                                      parseInt(e.target.value || "0", 10) || 0,
-                                  }
-                                )
-                              }
-                              className="w-14 text-center border border-slate-300 rounded py-1"
-                            />
-                          </td>
-                          <td className="py-3 px-2 text-center">
-                            <input
-                              type="number"
-                              min={0}
-                              value={rec.new_leads}
-                              onChange={(e) =>
-                                updateMonthlyPerformanceTierRecord(
-                                  editingMonthId,
-                                  editingSide,
-                                  tid,
-                                  {
-                                    new_leads:
-                                      parseInt(e.target.value || "0", 10) || 0,
-                                  }
-                                )
-                              }
-                              className="w-16 text-center border border-slate-300 rounded py-1"
-                            />
-                          </td>
-                          <td className="py-3 px-2 text-center">
-                            <input
-                              type="number"
-                              min={0}
-                              value={rec.diagnostics_or_consults_completed}
-                              onChange={(e) =>
-                                updateMonthlyPerformanceTierRecord(
-                                  editingMonthId,
-                                  editingSide,
-                                  tid,
-                                  {
-                                    diagnostics_or_consults_completed:
-                                      parseInt(e.target.value || "0", 10) || 0,
-                                  }
-                                )
-                              }
-                              className="w-14 text-center border border-slate-300 rounded py-1"
-                            />
-                          </td>
-                          <td className="py-3 px-2 text-center">
-                            <input
-                              type="number"
-                              min={0}
-                              value={rec.new_paid_students}
-                              onChange={(e) =>
-                                updateMonthlyPerformanceTierRecord(
-                                  editingMonthId,
-                                  editingSide,
-                                  tid,
-                                  {
-                                    new_paid_students:
-                                      parseInt(e.target.value || "0", 10) || 0,
-                                  }
-                                )
-                              }
-                              className="w-14 text-center border border-slate-300 rounded py-1"
-                            />
-                          </td>
-                          <td className="py-3 px-2 text-center">
-                            <input
-                              type="number"
-                              min={0}
-                              value={rec.referral_or_organic_new_students}
-                              onChange={(e) =>
-                                updateMonthlyPerformanceTierRecord(
-                                  editingMonthId,
-                                  editingSide,
-                                  tid,
-                                  {
-                                    referral_or_organic_new_students:
-                                      parseInt(e.target.value || "0", 10) || 0,
-                                  }
-                                )
-                              }
-                              className="w-14 text-center border border-slate-300 rounded py-1"
-                            />
-                          </td>
-                          <td className="py-3 px-2 text-center">
-                            <input
-                              type="number"
-                              min={0}
-                              value={rec.upgraded_to_higher_tier}
-                              onChange={(e) =>
-                                updateMonthlyPerformanceTierRecord(
-                                  editingMonthId,
-                                  editingSide,
-                                  tid,
-                                  {
-                                    upgraded_to_higher_tier:
-                                      parseInt(e.target.value || "0", 10) || 0,
-                                  }
-                                )
-                              }
-                              className="w-14 text-center border border-slate-300 rounded py-1"
-                            />
-                          </td>
-                          <td className="py-3 px-2 text-center">
-                            <input
-                              type="number"
-                              min={0}
-                              value={rec.churned_students}
-                              onChange={(e) =>
-                                updateMonthlyPerformanceTierRecord(
-                                  editingMonthId,
-                                  editingSide,
-                                  tid,
-                                  {
-                                    churned_students:
-                                      parseInt(e.target.value || "0", 10) || 0,
-                                  }
-                                )
-                              }
-                              className="w-14 text-center border border-slate-300 rounded py-1"
-                            />
-                          </td>
-                          <td className="py-3 px-2 text-center">
-                            <input
-                              type="number"
-                              min={0}
-                              value={rec.semester_pass_5mo_count || 0}
-                              onChange={(e) =>
-                                updateMonthlyPerformanceTierRecord(
-                                  editingMonthId,
-                                  editingSide,
-                                  tid,
-                                  {
-                                    semester_pass_5mo_count:
-                                      parseInt(e.target.value || "0", 10) || 0,
-                                  }
-                                )
-                              }
-                              className="w-14 text-center border border-slate-300 rounded py-1"
-                            />
-                          </td>
-                          <td className="py-3 px-2 text-center">
-                            {tid === "TIER_3" ? (
+            <div className="p-6 space-y-6 max-h-[82vh] overflow-y-auto">
+              {/* SECTION A: 3-Tier Student Counts, Standard vs Discounted Monthly Price, and Calculated Revenue */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-800">
+                    1. Core Funnel, Student Counts &amp; Discounted Monthly
+                    Pricing ({editingMonthId})
+                  </span>
+                  <span className="text-[11px] text-slate-500">
+                    Enter discounted monthly rate &amp; discounted account count
+                    for single-month promotions
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-600 border-b border-slate-200 font-semibold">
+                        <th className="py-2.5 px-3">Tier</th>
+                        <th className="py-2.5 px-2 text-center">Start Paid</th>
+                        <th className="py-2.5 px-2 text-center">New Leads</th>
+                        <th className="py-2.5 px-2 text-center">
+                          Diag/Consult
+                        </th>
+                        <th className="py-2.5 px-2 text-center">New Paid</th>
+                        <th className="py-2.5 px-2 text-center">Ref/Organic</th>
+                        <th className="py-2.5 px-2 text-center">Upgraded</th>
+                        <th className="py-2.5 px-2 text-center">Churned</th>
+                        <th className="py-2.5 px-2 text-center bg-amber-50/70">
+                          Promo $/mo
+                        </th>
+                        <th className="py-2.5 px-2 text-center bg-amber-50/70">
+                          Promo Accts
+                        </th>
+                        <th className="py-2.5 px-2 text-center">5-Mo Pass</th>
+                        <th className="py-2.5 px-2 text-center">
+                          T3 +$250 (8×60m)
+                        </th>
+                        <th className="py-2.5 px-3 text-right">End Paid</th>
+                        <th className="py-2.5 px-3 text-right">
+                          Recognized MRR
+                        </th>
+                        <th className="py-2.5 px-3 text-right">
+                          Cash Collected
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 font-mono">
+                      {TIER_ORDER.map((tid) => {
+                        const rec = activeEditingRecord[editingSide][tid];
+                        const ws = tierWorkspaces[tid];
+                        return (
+                          <tr key={tid}>
+                            <td className="py-3 px-3 font-sans font-semibold text-slate-900">
+                              {ws.tier_short_name} (${rec.unit_price_cad})
+                            </td>
+                            <td className="py-3 px-2 text-center">
                               <input
                                 type="number"
                                 min={0}
-                                value={rec.tier3_intensive_addon_count || 0}
+                                value={rec.starting_paid_students}
                                 onChange={(e) =>
                                   updateMonthlyPerformanceTierRecord(
                                     editingMonthId,
                                     editingSide,
-                                    "TIER_3",
+                                    tid,
                                     {
-                                      tier3_intensive_addon_count:
+                                      starting_paid_students:
                                         parseInt(e.target.value || "0", 10) ||
                                         0,
                                     }
                                   )
                                 }
-                                className="w-14 text-center border border-indigo-300 bg-indigo-50/40 rounded py-1"
+                                className="w-12 text-center border border-slate-300 rounded py-1"
                               />
-                            ) : (
-                              <span className="text-slate-300">—</span>
-                            )}
-                          </td>
-                          <td className="py-3 px-3 text-right font-bold text-slate-900">
-                            {rec.ending_paid_students}
-                          </td>
-                          <td className="py-3 px-3 text-right font-bold text-emerald-700">
-                            ${rec.recognized_mrr_cad.toLocaleString()}
-                          </td>
-                          <td className="py-3 px-3 text-right font-semibold text-indigo-700">
-                            ${rec.cash_collected_cad.toLocaleString()}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                            </td>
+                            <td className="py-3 px-2 text-center">
+                              <input
+                                type="number"
+                                min={0}
+                                value={rec.new_leads}
+                                onChange={(e) =>
+                                  updateMonthlyPerformanceTierRecord(
+                                    editingMonthId,
+                                    editingSide,
+                                    tid,
+                                    {
+                                      new_leads:
+                                        parseInt(e.target.value || "0", 10) ||
+                                        0,
+                                    }
+                                  )
+                                }
+                                className="w-14 text-center border border-slate-300 rounded py-1"
+                              />
+                            </td>
+                            <td className="py-3 px-2 text-center">
+                              <input
+                                type="number"
+                                min={0}
+                                value={rec.diagnostics_or_consults_completed}
+                                onChange={(e) =>
+                                  updateMonthlyPerformanceTierRecord(
+                                    editingMonthId,
+                                    editingSide,
+                                    tid,
+                                    {
+                                      diagnostics_or_consults_completed:
+                                        parseInt(e.target.value || "0", 10) ||
+                                        0,
+                                    }
+                                  )
+                                }
+                                className="w-12 text-center border border-slate-300 rounded py-1"
+                              />
+                            </td>
+                            <td className="py-3 px-2 text-center">
+                              <input
+                                type="number"
+                                min={0}
+                                value={rec.new_paid_students}
+                                onChange={(e) =>
+                                  updateMonthlyPerformanceTierRecord(
+                                    editingMonthId,
+                                    editingSide,
+                                    tid,
+                                    {
+                                      new_paid_students:
+                                        parseInt(e.target.value || "0", 10) ||
+                                        0,
+                                    }
+                                  )
+                                }
+                                className="w-12 text-center border border-slate-300 rounded py-1"
+                              />
+                            </td>
+                            <td className="py-3 px-2 text-center">
+                              <input
+                                type="number"
+                                min={0}
+                                value={rec.referral_or_organic_new_students}
+                                onChange={(e) =>
+                                  updateMonthlyPerformanceTierRecord(
+                                    editingMonthId,
+                                    editingSide,
+                                    tid,
+                                    {
+                                      referral_or_organic_new_students:
+                                        parseInt(e.target.value || "0", 10) ||
+                                        0,
+                                    }
+                                  )
+                                }
+                                className="w-12 text-center border border-slate-300 rounded py-1"
+                              />
+                            </td>
+                            <td className="py-3 px-2 text-center">
+                              <input
+                                type="number"
+                                min={0}
+                                value={rec.upgraded_to_higher_tier}
+                                onChange={(e) =>
+                                  updateMonthlyPerformanceTierRecord(
+                                    editingMonthId,
+                                    editingSide,
+                                    tid,
+                                    {
+                                      upgraded_to_higher_tier:
+                                        parseInt(e.target.value || "0", 10) ||
+                                        0,
+                                    }
+                                  )
+                                }
+                                className="w-12 text-center border border-slate-300 rounded py-1"
+                              />
+                            </td>
+                            <td className="py-3 px-2 text-center">
+                              <input
+                                type="number"
+                                min={0}
+                                value={rec.churned_students}
+                                onChange={(e) =>
+                                  updateMonthlyPerformanceTierRecord(
+                                    editingMonthId,
+                                    editingSide,
+                                    tid,
+                                    {
+                                      churned_students:
+                                        parseInt(e.target.value || "0", 10) ||
+                                        0,
+                                    }
+                                  )
+                                }
+                                className="w-12 text-center border border-slate-300 rounded py-1"
+                              />
+                            </td>
+                            {/* Discounted Promo Monthly Price */}
+                            <td className="py-3 px-2 text-center bg-amber-50/40">
+                              <input
+                                type="number"
+                                min={0}
+                                value={
+                                  rec.discounted_promo_price_cad !== undefined
+                                    ? rec.discounted_promo_price_cad
+                                    : rec.unit_price_cad
+                                }
+                                onChange={(e) =>
+                                  updateMonthlyPerformanceTierRecord(
+                                    editingMonthId,
+                                    editingSide,
+                                    tid,
+                                    {
+                                      discounted_promo_price_cad:
+                                        parseInt(e.target.value || "0", 10) ||
+                                        0,
+                                    }
+                                  )
+                                }
+                                className="w-14 text-center border border-amber-300 bg-white rounded py-1"
+                                title="Discounted promotional monthly price (CAD)"
+                              />
+                            </td>
+                            {/* Discounted Accounts Count */}
+                            <td className="py-3 px-2 text-center bg-amber-50/40">
+                              <input
+                                type="number"
+                                min={0}
+                                value={rec.discounted_accounts_count || 0}
+                                onChange={(e) =>
+                                  updateMonthlyPerformanceTierRecord(
+                                    editingMonthId,
+                                    editingSide,
+                                    tid,
+                                    {
+                                      discounted_accounts_count:
+                                        parseInt(e.target.value || "0", 10) ||
+                                        0,
+                                    }
+                                  )
+                                }
+                                className="w-12 text-center border border-amber-300 bg-white rounded py-1"
+                                title="Number of accounts sold at discounted monthly price"
+                              />
+                            </td>
+                            <td className="py-3 px-2 text-center">
+                              <input
+                                type="number"
+                                min={0}
+                                value={rec.semester_pass_5mo_count || 0}
+                                onChange={(e) =>
+                                  updateMonthlyPerformanceTierRecord(
+                                    editingMonthId,
+                                    editingSide,
+                                    tid,
+                                    {
+                                      semester_pass_5mo_count:
+                                        parseInt(e.target.value || "0", 10) ||
+                                        0,
+                                    }
+                                  )
+                                }
+                                className="w-12 text-center border border-slate-300 rounded py-1"
+                              />
+                            </td>
+                            <td className="py-3 px-2 text-center">
+                              {tid === "TIER_3" ? (
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={rec.tier3_intensive_addon_count || 0}
+                                  onChange={(e) =>
+                                    updateMonthlyPerformanceTierRecord(
+                                      editingMonthId,
+                                      editingSide,
+                                      "TIER_3",
+                                      {
+                                        tier3_intensive_addon_count:
+                                          parseInt(e.target.value || "0", 10) ||
+                                          0,
+                                      }
+                                    )
+                                  }
+                                  className="w-12 text-center border border-indigo-300 bg-indigo-50/40 rounded py-1"
+                                />
+                              ) : (
+                                <span className="text-slate-300">—</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-3 text-right font-bold text-slate-900">
+                              {rec.ending_paid_students}
+                            </td>
+                            <td className="py-3 px-3 text-right font-bold text-emerald-700">
+                              ${rec.recognized_mrr_cad.toLocaleString()}
+                            </td>
+                            <td className="py-3 px-3 text-right font-semibold text-indigo-700">
+                              ${rec.cash_collected_cad.toLocaleString()}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
-              {/* 4 Marketing Spend OpEx Categories */}
+              {/* SECTION B: SEPARATE MULTI-MONTH & PROMOTIONAL COHORT SALES RECORDER */}
+              {/* ("record how many accounts were sold for how many months, and at what price") */}
+              <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-amber-950">
+                      2. Promotional &amp; Multi-Month Cohort Sales Recorder (
+                      {editingMonthId})
+                    </h3>
+                    <p className="text-[11px] text-amber-800 mt-0.5">
+                      Record how many accounts were sold, for how many months,
+                      and at what total package price. Automatically splits
+                      upfront Cash Collected vs. monthly amortized Recognized
+                      MRR.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Add New Promotional Cohort Form */}
+                <form
+                  onSubmit={handleAddPromoCohort}
+                  className="grid grid-cols-1 sm:grid-cols-6 gap-2.5 items-end bg-white p-3.5 rounded-xl border border-amber-200/80 text-xs"
+                >
+                  <div>
+                    <label className="block text-[10px] font-semibold uppercase text-slate-500">
+                      Product Tier
+                    </label>
+                    <select
+                      value={promoTierId}
+                      onChange={(e) => setPromoTierId(e.target.value as TierId)}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 bg-white font-semibold"
+                    >
+                      <option value="TIER_1">Tier 1 · Online</option>
+                      <option value="TIER_2">Tier 2 · Managed</option>
+                      <option value="TIER_3">Tier 3 · Prime 1:1</option>
+                    </select>
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-[10px] font-semibold uppercase text-slate-500">
+                      Promotion / Cohort Name
+                    </label>
+                    <input
+                      type="text"
+                      value={promoLabel}
+                      onChange={(e) => setPromoLabel(e.target.value)}
+                      placeholder="e.g., Pilot Beta 3-Mo Bundle or Midterm Promo"
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-semibold uppercase text-slate-500">
+                      Accounts Sold
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={promoAccountsSold}
+                      onChange={(e) =>
+                        setPromoAccountsSold(
+                          parseInt(e.target.value || "1", 10) || 1
+                        )
+                      }
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-semibold uppercase text-slate-500">
+                      Months Duration
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={24}
+                      value={promoMonthsDuration}
+                      onChange={(e) =>
+                        setPromoMonthsDuration(
+                          parseInt(e.target.value || "1", 10) || 1
+                        )
+                      }
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-semibold uppercase text-slate-500">
+                      Package Price / Acct ($)
+                    </label>
+                    <div className="mt-1 flex items-center gap-1.5">
+                      <input
+                        type="number"
+                        min={0}
+                        value={promoTotalPriceCad}
+                        onChange={(e) =>
+                          setPromoTotalPriceCad(
+                            parseInt(e.target.value || "0", 10) || 0
+                          )
+                        }
+                        className="w-full rounded-lg border border-slate-300 px-2 py-1.5 font-mono"
+                      />
+                      <button
+                        type="submit"
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold shrink-0"
+                        title="Add Promotional Cohort"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Add</span>
+                      </button>
+                    </div>
+                  </div>
+                </form>
+
+                {/* List of Recorded Promotional Cohorts Across Tiers for This Month */}
+                <div className="space-y-1.5">
+                  {TIER_ORDER.flatMap((tid) =>
+                    (
+                      activeEditingRecord[editingSide][tid].promo_cohorts || []
+                    ).map((cohort) => {
+                      const totalCash =
+                        cohort.accounts_sold *
+                        cohort.total_price_per_account_cad;
+                      const monthlyRecognized = Math.round(
+                        totalCash / Math.max(1, cohort.months_duration)
+                      );
+                      return (
+                        <div
+                          key={cohort.id}
+                          className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2 rounded-lg bg-white border border-amber-200 text-xs"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="px-2 py-0.5 rounded bg-slate-100 font-mono text-[11px] font-semibold text-slate-700">
+                              {tierWorkspaces[tid].tier_short_name}
+                            </span>
+                            <span className="font-semibold text-slate-900">
+                              {cohort.promo_label}
+                            </span>
+                            <span className="text-slate-500 font-mono">
+                              · {cohort.accounts_sold} accounts ×{" "}
+                              {cohort.months_duration} mo @ $
+                              {cohort.total_price_per_account_cad}/acct
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-3 font-mono">
+                            <span className="text-emerald-700 font-semibold">
+                              MRR: +${monthlyRecognized}/mo
+                            </span>
+                            <span className="text-indigo-700 font-semibold">
+                              Cash: +${totalCash} CAD
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                removePromoCohortFromMonthlyRecord(
+                                  editingMonthId,
+                                  editingSide,
+                                  tid,
+                                  cohort.id
+                                )
+                              }
+                              className="text-rose-500 hover:text-rose-700"
+                              title="Remove cohort"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* SECTION C: 4 Marketing Spend OpEx Categories */}
               <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-3">
                 <div className="text-xs font-semibold text-slate-800">
-                  Monthly Marketing Spend Breakdown (4 Finance OpEx Accounts —{" "}
-                  {editingSide === "actuals" ? "ActualSpend" : "TargetSpend"})
+                  3. Monthly Marketing Spend Breakdown (4 Finance OpEx Accounts
+                  — {editingSide === "actuals" ? "Actual Spend" : "Target Spend"}
+                  )
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {(

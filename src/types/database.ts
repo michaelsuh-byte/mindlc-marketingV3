@@ -207,9 +207,34 @@ export type PeriodClosingStatus = "OPEN" | "AUDITED" | "CLOSED_AND_LOCKED";
 // SECTION 3. FINANCE-READY MONTHLY ATOMIC LEDGER & DUAL-VIEW CLOSING SCHEMA
 // ============================================================================
 
+export interface UnitEconomicsCostConfig {
+  ai_api_cost_per_student_cad: number; // Default: $9.00
+  stripe_fee_pct: number; // Default: 2.9 (%)
+  stripe_fixed_fee_cad: number; // Default: $0.30
+  manager_hourly_loaded_cad: number; // Default: $29.12 ($26/hr + 12% statutory load)
+  tier2_manager_mins_avg: number; // Default: 60 mins (30m async + 25m briefing + 5m notes)
+  tier2_manager_mins_max: number; // Default: 65 mins (30m max briefing)
+  tutor_hourly_loaded_cad: number; // Default: $44.80 ($40/hr + 12% statutory load)
+  tier3_base_sessions_per_mo: number; // Default: 4 (60-min sessions/mo)
+  tier3_intensive_sessions_per_mo: number; // Default: 8 (60-min sessions/mo)
+  tier3_briefing_mins_avg: number; // Default: 25 mins (tutor-integrated monthly briefing)
+  tier3_briefing_mins_max: number; // Default: 30 mins
+}
+
+export interface PromoCohortSale {
+  id: string;
+  promo_label: string; // e.g., "5-Mo Semester Pass", "Pilot Beta Discount", "Sibling Add-on"
+  accounts_sold: number; // How many accounts were sold under this promo/term
+  months_duration: number; // For how many months (e.g., 1, 3, 5, 10)
+  total_price_per_account_cad: number; // At what total price per account collected in this month (or monthly rate if 1 mo)
+}
+
 export interface MonthlyTierRecord {
   tier_id: TierId;
   unit_price_cad: number; // Defaults: 39, 139, 399
+  discounted_promo_price_cad?: number; // Optional promotional monthly price for discounted accounts sold this month
+  discounted_accounts_count?: number; // Number of accounts sold at the discounted monthly price
+  promo_cohorts?: PromoCohortSale[]; // Separate itemized cohorts: how many accounts sold, for how many months, at what price
   tier3_intensive_addon_count?: number; // Number of Tier 3 students paying +$250/mo (8x60m)
   semester_pass_5mo_count?: number; // Upfront 5-month semester pass enrollments
   sibling_addon_count?: number; // Sibling add-ons (+$19, +$79, +$349)
@@ -221,9 +246,9 @@ export interface MonthlyTierRecord {
   upgraded_to_higher_tier: number; // Tier 1->2 or Tier 2->3
   churned_students: number;
   ending_paid_students: number;
-  // Finance-ready split (handles 5-month upfront Semester Passes cleanly):
+  // Finance-ready split (handles 5-month upfront Semester Passes & multi-month promo cohorts cleanly):
   cash_collected_cad: number; // Actual Stripe/cash bookings received in this month
-  recognized_mrr_cad: number; // Earned monthly revenue (includes Tier 3 +$250 add-ons)
+  recognized_mrr_cad: number; // Earned monthly revenue (includes amortized multi-month cohorts & Tier 3 +$250 add-ons)
 }
 
 export interface MonthlyMarketingSpend {

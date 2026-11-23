@@ -33,9 +33,57 @@ import {
   TrendingUp,
   Layers,
   BarChart3,
+  CalendarClock,
+  Radar,
+  BookOpen,
+  ShieldCheck,
 } from "lucide-react";
 
 const STAGE_ORDER: StageId[] = ["STAGE_1", "STAGE_2", "STAGE_3"];
+
+const TOP_NAV_TABS: {
+  id: NavigationTab;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  iconColor: string;
+}[] = [
+  {
+    id: "copilot",
+    label: "Campaigns & Tiers",
+    icon: Layers,
+    iconColor: "text-indigo-600",
+  },
+  {
+    id: "closing",
+    label: "Closing & Analytics",
+    icon: BarChart3,
+    iconColor: "text-emerald-600",
+  },
+  {
+    id: "planner",
+    label: "CMO Planner",
+    icon: CalendarClock,
+    iconColor: "text-teal-600",
+  },
+  {
+    id: "intel",
+    label: "Market & Competitors",
+    icon: Radar,
+    iconColor: "text-sky-600",
+  },
+  {
+    id: "skills",
+    label: "Playbook Skills",
+    icon: BookOpen,
+    iconColor: "text-amber-600",
+  },
+  {
+    id: "settings",
+    label: "Brand Guardrails",
+    icon: ShieldCheck,
+    iconColor: "text-purple-600",
+  },
+];
 
 const TAG_BADGE_STYLES: Record<VerbatimParentQuote["context_tag"], string> = {
   ai_cheating: "bg-rose-50 text-rose-700 border-rose-200",
@@ -237,20 +285,19 @@ export function SafeguardTopBar() {
   ];
   const weakestRateObj = [...stepRates].sort((a, b) => a.rate - b.rate)[0];
 
-  // Dynamically computed Combined 3-Tier Benchmarks (Section 1.2)
+  // Dynamically computed Combined 3-Tier Benchmarks
   const combinedBenchmarks = computeCombined3TierBenchmarks(tierWorkspaces);
 
-  const isCampaignsAndTiersTab = activeTab !== "closing";
+  const isCampaignsAndTiersTab = activeTab === "copilot";
 
   return (
     <>
       {/* ===================================================================== */}
-      {/* 4.1 TOP-LEVEL NAVIGATION BAR (Height ~56px — ONLY 2 Primary Tabs)     */}
-      {/*     Tab 1: Campaigns & Tiers | Tab 2: Closing & Analytics             */}
+      {/* TOP-LEVEL NAVIGATION BAR (All Workspace & Strategy Tools on Top Row)  */}
       {/* ===================================================================== */}
-      <header className="sticky top-0 z-30 h-[56px] bg-white border-b border-slate-200 px-5 flex items-center justify-between select-none">
-        {/* LEFT: Brand Mark + ONLY 2 Primary Tabs */}
-        <div className="flex items-center gap-5">
+      <header className="sticky top-0 z-30 min-h-[56px] bg-white border-b border-slate-200 px-5 py-1.5 flex flex-wrap items-center justify-between gap-3 select-none">
+        {/* LEFT: Brand Mark + All Top-Row Workspace Tabs */}
+        <div className="flex items-center gap-3 flex-wrap">
           <button
             onClick={() => setActiveTab("copilot")}
             className="flex items-center gap-2 text-left group focus:outline-none"
@@ -263,99 +310,42 @@ export function SafeguardTopBar() {
               <span className="text-sm font-semibold tracking-tight text-slate-900">
                 MindLC
               </span>
-              <span className="ml-1.5 text-[11px] text-slate-400 font-medium">
-                Executive Cockpit
-              </span>
             </div>
           </button>
 
           <div className="h-4 w-[1px] bg-slate-200 hidden sm:block" />
 
-          {/* 2 Primary Tabs */}
+          {/* All Workspace & Strategy Tools as Separate Top-Row Tabs */}
           <nav
             aria-label="Primary Platform Navigation"
-            className="inline-flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/80"
+            className="flex items-center flex-wrap gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/80"
           >
-            <button
-              onClick={() => setActiveTab("copilot")}
-              className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                isCampaignsAndTiersTab
-                  ? "bg-white text-slate-900 shadow-2xs border border-slate-200/80 font-semibold"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Campaigns &amp; Tiers</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("closing")}
-              className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                activeTab === "closing"
-                  ? "bg-white text-slate-900 shadow-2xs border border-slate-200/80 font-semibold"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              <BarChart3 className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Closing &amp; Analytics</span>
-            </button>
+            {TOP_NAV_TABS.map((tab) => {
+              const IconComp = tab.icon;
+              const isSelected = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    isSelected
+                      ? "bg-white text-slate-900 shadow-2xs border border-slate-200/80 font-semibold"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
+                  }`}
+                >
+                  <IconComp className={`w-3.5 h-3.5 ${tab.iconColor}`} />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
           </nav>
         </div>
 
-        {/* RIGHT: Subtle Secondary Strategy Menu (Planner / Market Intel / Brand Persona) */}
-        <div className="flex items-center gap-2">
-          <span className="hidden lg:inline-block text-[11px] text-slate-400 font-mono">
+        {/* RIGHT: Market Context Label */}
+        <div className="hidden xl:flex items-center gap-2">
+          <span className="text-[11px] text-slate-400 font-mono">
             Ontario Gr 9–12 STEM · CAD
           </span>
-          <div className="relative">
-            <button
-              onClick={() => setShowUtilityMenu((prev) => !prev)}
-              className={`p-1.5 rounded-lg border text-xs transition-colors ${
-                showUtilityMenu
-                  ? "bg-slate-900 text-white border-slate-900"
-                  : "bg-white text-slate-500 hover:text-slate-800 border-slate-200"
-              }`}
-              title="Additional Strategy Tools (Planner, Market Intel, Playbooks)"
-            >
-              <Compass className="w-4 h-4" />
-            </button>
-
-            {showUtilityMenu && (
-              <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-lg border border-slate-200 py-1.5 z-50">
-                <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                  Workspace &amp; Strategy Tools
-                </div>
-                {(
-                  [
-                    { id: "copilot", label: "📄 Campaigns & Tiers Cockpit" },
-                    { id: "closing", label: "📊 Closing & Analytics Ledger" },
-                    { id: "planner", label: "🗓️ Multi-Horizon CMO Planner" },
-                    { id: "intel", label: "🔭 Ontario Market & Competitors" },
-                    { id: "skills", label: "⚡ AI Playbook Skills" },
-                    { id: "settings", label: "🛡️ Brand Guardrails" },
-                  ] as { id: NavigationTab; label: string }[]
-                ).map((nav) => (
-                  <button
-                    key={nav.id}
-                    onClick={() => {
-                      setActiveTab(nav.id);
-                      setShowUtilityMenu(false);
-                    }}
-                    className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between ${
-                      activeTab === nav.id
-                        ? "bg-indigo-50 text-indigo-700 font-semibold"
-                        : "text-slate-700 hover:bg-slate-50"
-                    }`}
-                  >
-                    <span>{nav.label}</span>
-                    {activeTab === nav.id && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
         </div>
       </header>
 

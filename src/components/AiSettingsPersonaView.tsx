@@ -52,16 +52,15 @@ export function AiSettingsPersonaView() {
         <div>
           <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-indigo-700 mb-1">
             <Sliders className="w-4 h-4" />
-            3-Tier × 3-Stage Isolated Context Builder &amp; Schema
+            Brand Positioning &amp; Tier Guardrails
           </div>
           <h1 className="text-2xl font-extrabold text-slate-900">
-            Tier-Aware Agent System Prompt &amp; Cross-Tier Tone Guardrails
+            Brand Guardrails &amp; Tier Positioning
           </h1>
           <p className="text-sm text-slate-600">
-            Inspect how switching between `TIER_1` (Self-Coach), `TIER_2`
-            (Managed Hybrid), and `TIER_3` (Prime 1:1) dynamically isolates the
-            Agent&apos;s system instruction, funnel metrics, and top 8 VoC
-            quotes.
+            Configure product positioning, curriculum alignment, and messaging
+            boundaries for Tier 1 (Online Self-Coach), Tier 2 (Managed Hybrid),
+            and Tier 3 (Prime 1:1).
           </p>
         </div>
 
@@ -215,7 +214,7 @@ export function AiSettingsPersonaView() {
                 S1 (0–25) · S2 (26–60) · S3 (61–100)
               </li>
               <li>
-                <strong className="text-slate-900">TIER_3 ($349/mo):</strong>{" "}
+                <strong className="text-slate-900">TIER_3 ($399/mo):</strong>{" "}
                 S1 (0–5) · S2 (6–15) · S3 (16–30)
               </li>
               <li>

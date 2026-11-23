@@ -23,11 +23,13 @@ import {
   PlanHorizon,
   PlannedActivity,
   PlanQaExchange,
+  PromoCohortSale,
   RealityGateStatus,
   StageId,
   TierId,
   TierPricingConfig,
   TierWorkspaceState,
+  UnitEconomicsCostConfig,
   UserRecord,
   VerbatimParentQuote,
   VoCTierTag,
@@ -39,6 +41,7 @@ import {
   computeFunnelRates,
   DEFAULT_TIER_PRICING,
   DEFAULT_TIER_STAGE_GOALS,
+  DEFAULT_UNIT_ECONOMICS_COSTS,
   evaluateCmoPlanQuestionAndAdjust,
   executeAutonomousAgentTask,
   formatTierPriceSummary,
@@ -73,6 +76,8 @@ interface MarketingState {
   calendarReportingMode: CalendarReportingMode;
   selectedReportingPeriodId: string;
   fiscalYearStartMonth: 1 | 9;
+  unitEconomicsCosts: UnitEconomicsCostConfig;
+  maxAcademicStartYear: number;
 
   // Active Tier Synchronized Mirrors
   assets: Asset[];
@@ -143,6 +148,23 @@ interface MarketingState {
   setCalendarReportingMode: (mode: CalendarReportingMode) => void;
   setSelectedReportingPeriodId: (periodId: string) => void;
   setFiscalYearStartMonth: (month: 1 | 9) => void;
+  setMaxAcademicStartYear: (year: number) => void;
+  ensureMonthlyPerformanceRecordExists: (monthId: string) => void;
+  updateUnitEconomicsCosts: (
+    partialCosts: Partial<UnitEconomicsCostConfig>
+  ) => void;
+  addPromoCohortToMonthlyRecord: (
+    monthId: string,
+    side: "targets" | "actuals",
+    tierId: TierId,
+    cohort: Omit<PromoCohortSale, "id">
+  ) => void;
+  removePromoCohortFromMonthlyRecord: (
+    monthId: string,
+    side: "targets" | "actuals",
+    tierId: TierId,
+    cohortId: string
+  ) => void;
   updateMonthlyPerformanceTierRecord: (
     monthId: string,
     side: "targets" | "actuals",
@@ -1968,6 +1990,8 @@ export const useMarketingStore = create<MarketingState>((set, get) => {
     calendarReportingMode: "ONTARIO_ACADEMIC",
     selectedReportingPeriodId: "2026-27-SEM-1",
     fiscalYearStartMonth: 1,
+    unitEconomicsCosts: DEFAULT_UNIT_ECONOMICS_COSTS,
+    maxAcademicStartYear: 2029,
 
     ...syncMirrorsFromTier(initialWs),
 
@@ -2198,6 +2222,142 @@ export const useMarketingStore = create<MarketingState>((set, get) => {
       set({
         fiscalYearStartMonth: month,
         selectedReportingPeriodId: month === 9 ? "FY27-Q1-SEP" : "2026-Q4",
+      }),
+
+    setMaxAcademicStartYear: (year) =>
+      set({ maxAcademicStartYear: Math.max(2027, Math.min(2035, year)) }),
+
+    ensureMonthlyPerformanceRecordExists: (monthId) =>
+      set((state) => {
+        if (state.monthlyPerformanceRecords.some((r) => r.month_id === monthId)) {
+          return state;
+        }
+        const sorted = [...state.monthlyPerformanceRecords].sort((a, b) =>
+          a.month_id.localeCompare(b.month_id)
+        );
+        const template = sorted[sorted.length - 1] || INITIAL_MONTHLY_PERFORMANCE_RECORDS[0];
+
+        const makeEmptySide = (side: "targets" | "actuals") => {
+          const out = {} as Record<TierId, MonthlyTierRecord>;
+          (["TIER_1", "TIER_2", "TIER_3"] as TierId[]).forEach((tid) => {
+            const prevEnd = template[side][tid].ending_paid_students;
+            const unitPrice = state.tierWorkspaces[tid].pricing_config.base_monthly_cad;
+            out[tid] = recalculateMonthlyTierRecord(
+              {
+                tier_id: tid,
+                unit_price_cad: unitPrice,
+                discounted_promo_price_cad: unitPrice,
+                discounted_accounts_count: 0,
+                promo_cohorts: [],
+                tier3_intensive_addon_count: 0,
+                semester_pass_5mo_count: 0,
+                sibling_addon_count: 0,
+                starting_paid_students: side === "actuals" ? prevEnd : template.targets[tid].ending_paid_students,
+                new_leads: 0,
+                diagnostics_or_consults_completed: 0,
+                new_paid_students: 0,
+                referral_or_organic_new_students: 0,
+                upgraded_to_higher_tier: 0,
+                churned_students: 0,
+                ending_paid_students: side === "actuals" ? prevEnd : template.targets[tid].ending_paid_students,
+                cash_collected_cad: 0,
+                recognized_mrr_cad: 0,
+              },
+              state.tierWorkspaces[tid].pricing_config
+            );
+          });
+          return out;
+        };
+
+        const newRecord: MonthlyPerformanceRecord = {
+          month_id: monthId,
+          month_label: `${monthId} Ledger Period`,
+          status: "PLANNING",
+          targets: makeEmptySide("targets"),
+          actuals: makeEmptySide("actuals"),
+          spend_target: { ...template.spend_target },
+          spend_actual: {
+            paid_ads_cad: 0,
+            events_seminars_cad: 0,
+            referral_credits_cad: 0,
+            marketing_tools_cad: 120,
+          },
+          closing_notes: `Created monthly ledger record for ${monthId}.`,
+        };
+
+        const nextList = [...state.monthlyPerformanceRecords, newRecord].sort(
+          (a, b) => a.month_id.localeCompare(b.month_id)
+        );
+        return {
+          monthlyPerformanceRecords: nextList,
+          diagnosticToast: `Initialized monthly ledger record for ${monthId}.`,
+        };
+      }),
+
+    updateUnitEconomicsCosts: (partialCosts) =>
+      set((state) => ({
+        unitEconomicsCosts: {
+          ...state.unitEconomicsCosts,
+          ...partialCosts,
+        },
+        diagnosticToast:
+          "Updated unit economics cost assumptions & dynamically recalculated contribution margins.",
+      })),
+
+    addPromoCohortToMonthlyRecord: (monthId, side, tierId, cohort) =>
+      set((state) => {
+        const pricing = state.tierWorkspaces[tierId].pricing_config;
+        const updatedRecords = state.monthlyPerformanceRecords.map((rec) => {
+          if (rec.month_id !== monthId) return rec;
+          const currentTierRec = rec[side][tierId];
+          const existingCohorts = currentTierRec.promo_cohorts || [];
+          const newCohort: PromoCohortSale = {
+            ...cohort,
+            id: `promo-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          };
+          const recalculated = recalculateMonthlyTierRecord(
+            {
+              ...currentTierRec,
+              promo_cohorts: [...existingCohorts, newCohort],
+            },
+            pricing
+          );
+          return {
+            ...rec,
+            [side]: {
+              ...rec[side],
+              [tierId]: recalculated,
+            },
+          };
+        });
+        return { monthlyPerformanceRecords: updatedRecords };
+      }),
+
+    removePromoCohortFromMonthlyRecord: (monthId, side, tierId, cohortId) =>
+      set((state) => {
+        const pricing = state.tierWorkspaces[tierId].pricing_config;
+        const updatedRecords = state.monthlyPerformanceRecords.map((rec) => {
+          if (rec.month_id !== monthId) return rec;
+          const currentTierRec = rec[side][tierId];
+          const filtered = (currentTierRec.promo_cohorts || []).filter(
+            (c) => c.id !== cohortId
+          );
+          const recalculated = recalculateMonthlyTierRecord(
+            {
+              ...currentTierRec,
+              promo_cohorts: filtered,
+            },
+            pricing
+          );
+          return {
+            ...rec,
+            [side]: {
+              ...rec[side],
+              [tierId]: recalculated,
+            },
+          };
+        });
+        return { monthlyPerformanceRecords: updatedRecords };
       }),
 
     updateMonthlyPerformanceTierRecord: (monthId, side, tierId, partialRecord) =>

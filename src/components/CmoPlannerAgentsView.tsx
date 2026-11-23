@@ -81,16 +81,16 @@ export function CmoPlannerAgentsView() {
         <div>
           <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-teal-700 mb-1">
             <Bot className="w-4 h-4" />
-            Self-Guided Multi-Agent Marketing Operating System
+            Multi-Agent Marketing Operating System
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">
-            CMO Multi-Horizon Planner & Autonomous Agent Team
+            CMO Multi-Horizon Planner &amp; Autonomous Agent Team
           </h1>
           <p className="text-sm text-slate-600 max-w-3xl mt-1">
-            Zero-jargon Daily, Weekly, Monthly, Quarterly, and Annual execution
-            plans synchronized with Ontario Grades 7–12 math trends. Ask
-            questions to dynamically adjust the plan, or dispatch your 5
-            specialist agents to execute lead-gen and conversion deliverables.
+            Daily, Weekly, Monthly, Quarterly, and Annual execution plans
+            synchronized with Ontario Grades 9–12 STEM trends. Ask questions to
+            dynamically adjust the schedule, or dispatch specialist agents to
+            draft lead-generation and conversion assets.
           </p>
         </div>
 
@@ -401,14 +401,14 @@ export function CmoPlannerAgentsView() {
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 text-xs">
                   <div className="lg:col-span-8 p-4 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2">
                     <div className="font-bold text-slate-900 uppercase tracking-wider text-[11px]">
-                      Concrete Tactical Execution Blueprint (Zero-Jargon):
+                      Execution Plan:
                     </div>
                     <p className="text-slate-700 leading-relaxed text-xs">
                       {act.tacticalExecution}
                     </p>
                     <div className="pt-1 text-slate-600">
                       <strong className="text-slate-900">
-                        Exact Deliverable Produced:
+                        Deliverable:
                       </strong>{" "}
                       {act.deliverableSpec}
                     </div>

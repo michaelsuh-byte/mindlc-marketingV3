@@ -127,10 +127,10 @@ export function MarketIntelView() {
           <div className="space-y-1">
             <div className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-teal-400">
               <Globe className="w-4 h-4" />
-              Agent-01 Live Competitor Website Scanner (`/api/market-intel`)
+              Live Competitor Website Scanner
             </div>
             <h2 className="text-lg font-bold">
-              Inspect Any Competitor URL & Generate a MindLC Counter-Battlecard
+              Inspect Any Competitor URL &amp; Generate a MindLC Counter-Battlecard
             </h2>
             <p className="text-xs text-slate-400">
               Enter any tutoring or EdTech URL (e.g.,{" "}
@@ -138,7 +138,7 @@ export function MarketIntelView() {
               <code className="text-teal-300">kumon.com</code>,{" "}
               <code className="text-teal-300">varsitytutors.com</code>,{" "}
               <code className="text-teal-300">tvolearn.com</code>) to extract
-              their live H1 pitch, pricing signals, and Ontario curriculum gaps.
+              their headline pitch, pricing signals, and Ontario curriculum gaps.
             </p>
           </div>
         </div>

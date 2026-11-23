@@ -21,9 +21,189 @@ import {
   TierId,
   TierPricingConfig,
   TierWorkspaceState,
+  UnitEconomicsCostConfig,
   VerbatimParentQuote,
   WeeklyFunnelMetrics,
 } from "@/types/database";
+
+export const DEFAULT_UNIT_ECONOMICS_COSTS: UnitEconomicsCostConfig = {
+  ai_api_cost_per_student_cad: 9.0,
+  stripe_fee_pct: 2.9,
+  stripe_fixed_fee_cad: 0.3,
+  manager_hourly_loaded_cad: 29.12, // $26/hr + 12% statutory load
+  tier2_manager_mins_avg: 60, // 30m async + 25m briefing + 5m notes
+  tier2_manager_mins_max: 65, // 30m max briefing
+  tutor_hourly_loaded_cad: 44.8, // $40/hr + 12% statutory load
+  tier3_base_sessions_per_mo: 4, // 4 × 60-min live sessions/mo
+  tier3_intensive_sessions_per_mo: 8, // 8 × 60-min live sessions/mo
+  tier3_briefing_mins_avg: 25, // 25m avg tutor-integrated briefing
+  tier3_briefing_mins_max: 30, // 30m max tutor-integrated briefing
+};
+
+export function computeTierUnitEconomics(
+  tierWorkspaces: Record<TierId, TierWorkspaceState>,
+  costConfig: UnitEconomicsCostConfig = DEFAULT_UNIT_ECONOMICS_COSTS
+) {
+  const ai = costConfig.ai_api_cost_per_student_cad;
+  const stripeFor = (price: number) =>
+    Number(
+      ((price * costConfig.stripe_fee_pct) / 100 +
+        costConfig.stripe_fixed_fee_cad).toFixed(2)
+    );
+
+  // Tier 1
+  const t1Price = tierWorkspaces.TIER_1.pricing_config.base_monthly_cad;
+  const t1Stripe = stripeFor(t1Price);
+  const t1DirectCost = Number((ai + t1Stripe).toFixed(2));
+  const t1CmAvg25 = Number((t1Price - t1DirectCost).toFixed(2));
+  const t1CmPctAvg25 =
+    t1Price > 0 ? Number(((t1CmAvg25 / t1Price) * 100).toFixed(1)) : 0;
+
+  // Tier 2
+  const t2Price = tierWorkspaces.TIER_2.pricing_config.base_monthly_cad;
+  const t2Stripe = stripeFor(t2Price);
+  const t2MgrAvg25 = Number(
+    (
+      (costConfig.manager_hourly_loaded_cad *
+        costConfig.tier2_manager_mins_avg) /
+      60
+    ).toFixed(2)
+  );
+  const t2MgrMax30 = Number(
+    (
+      (costConfig.manager_hourly_loaded_cad *
+        costConfig.tier2_manager_mins_max) /
+      60
+    ).toFixed(2)
+  );
+  const t2DirectAvg25 = Number((ai + t2MgrAvg25 + t2Stripe).toFixed(2));
+  const t2DirectMax30 = Number((ai + t2MgrMax30 + t2Stripe).toFixed(2));
+  const t2CmAvg25 = Number((t2Price - t2DirectAvg25).toFixed(2));
+  const t2CmMax30 = Number((t2Price - t2DirectMax30).toFixed(2));
+  const t2CmPctAvg25 =
+    t2Price > 0 ? Number(((t2CmAvg25 / t2Price) * 100).toFixed(1)) : 0;
+  const t2CmPctMax30 =
+    t2Price > 0 ? Number(((t2CmMax30 / t2Price) * 100).toFixed(1)) : 0;
+
+  // Tier 3 Base (4 x 60m)
+  const t3Price = tierWorkspaces.TIER_3.pricing_config.base_monthly_cad;
+  const t3Stripe = stripeFor(t3Price);
+  const t3BriefingAvg25 = Number(
+    (
+      (costConfig.tutor_hourly_loaded_cad *
+        costConfig.tier3_briefing_mins_avg) /
+      60
+    ).toFixed(2)
+  );
+  const t3BriefingMax30 = Number(
+    (
+      (costConfig.tutor_hourly_loaded_cad *
+        costConfig.tier3_briefing_mins_max) /
+      60
+    ).toFixed(2)
+  );
+  const t3LiveTutorBase = Number(
+    (
+      costConfig.tutor_hourly_loaded_cad *
+      costConfig.tier3_base_sessions_per_mo
+    ).toFixed(2)
+  );
+  const t3DirectAvg25 = Number(
+    (ai + t3BriefingAvg25 + t3LiveTutorBase + t3Stripe).toFixed(2)
+  );
+  const t3DirectMax30 = Number(
+    (ai + t3BriefingMax30 + t3LiveTutorBase + t3Stripe).toFixed(2)
+  );
+  const t3CmAvg25 = Number((t3Price - t3DirectAvg25).toFixed(2));
+  const t3CmMax30 = Number((t3Price - t3DirectMax30).toFixed(2));
+  const t3CmPctAvg25 =
+    t3Price > 0 ? Number(((t3CmAvg25 / t3Price) * 100).toFixed(1)) : 0;
+  const t3CmPctMax30 =
+    t3Price > 0 ? Number(((t3CmMax30 / t3Price) * 100).toFixed(1)) : 0;
+
+  // Tier 3+ Intensive Add-on (8 x 60m)
+  const t3PlusPrice =
+    t3Price +
+    (tierWorkspaces.TIER_3.pricing_config.intensive_addon_monthly_cad || 250);
+  const t3PlusStripe = stripeFor(t3PlusPrice);
+  const t3LiveTutorIntensive = Number(
+    (
+      costConfig.tutor_hourly_loaded_cad *
+      costConfig.tier3_intensive_sessions_per_mo
+    ).toFixed(2)
+  );
+  const t3PlusDirectAvg25 = Number(
+    (ai + t3BriefingAvg25 + t3LiveTutorIntensive + t3PlusStripe).toFixed(2)
+  );
+  const t3PlusDirectMax30 = Number(
+    (ai + t3BriefingMax30 + t3LiveTutorIntensive + t3PlusStripe).toFixed(2)
+  );
+  const t3PlusCmAvg25 = Number((t3PlusPrice - t3PlusDirectAvg25).toFixed(2));
+  const t3PlusCmMax30 = Number((t3PlusPrice - t3PlusDirectMax30).toFixed(2));
+  const t3PlusCmPctAvg25 =
+    t3PlusPrice > 0
+      ? Number(((t3PlusCmAvg25 / t3PlusPrice) * 100).toFixed(1))
+      : 0;
+  const t3PlusCmPctMax30 =
+    t3PlusPrice > 0
+      ? Number(((t3PlusCmMax30 / t3PlusPrice) * 100).toFixed(1))
+      : 0;
+
+  return {
+    TIER_1: {
+      price: t1Price,
+      ai,
+      managerOrBriefingAvg25: 0,
+      managerOrBriefingMax30: 0,
+      liveTutor: 0,
+      stripe: t1Stripe,
+      directCostAvg25: t1DirectCost,
+      cmAvg25: t1CmAvg25,
+      cmPctAvg25: t1CmPctAvg25,
+      cmMax30: t1CmAvg25,
+      cmPctMax30: t1CmPctAvg25,
+    },
+    TIER_2: {
+      price: t2Price,
+      ai,
+      managerOrBriefingAvg25: t2MgrAvg25,
+      managerOrBriefingMax30: t2MgrMax30,
+      liveTutor: 0,
+      stripe: t2Stripe,
+      directCostAvg25: t2DirectAvg25,
+      cmAvg25: t2CmAvg25,
+      cmPctAvg25: t2CmPctAvg25,
+      cmMax30: t2CmMax30,
+      cmPctMax30: t2CmPctMax30,
+    },
+    TIER_3: {
+      price: t3Price,
+      ai,
+      managerOrBriefingAvg25: t3BriefingAvg25,
+      managerOrBriefingMax30: t3BriefingMax30,
+      liveTutor: t3LiveTutorBase,
+      stripe: t3Stripe,
+      directCostAvg25: t3DirectAvg25,
+      cmAvg25: t3CmAvg25,
+      cmPctAvg25: t3CmPctAvg25,
+      cmMax30: t3CmMax30,
+      cmPctMax30: t3CmPctMax30,
+    },
+    TIER_3_INTENSIVE: {
+      price: t3PlusPrice,
+      ai,
+      managerOrBriefingAvg25: t3BriefingAvg25,
+      managerOrBriefingMax30: t3BriefingMax30,
+      liveTutor: t3LiveTutorIntensive,
+      stripe: t3PlusStripe,
+      directCostAvg25: t3PlusDirectAvg25,
+      cmAvg25: t3PlusCmAvg25,
+      cmPctAvg25: t3PlusCmPctAvg25,
+      cmMax30: t3PlusCmMax30,
+      cmPctMax30: t3PlusCmPctMax30,
+    },
+  };
+}
 
 // ============================================================================
 // 1. FINALIZED 3-TIER PRICING DEFAULTS & DYNAMIC REVENUE CALCULATORS (CAD)
@@ -94,8 +274,10 @@ export function computeStageExpectedRevenue(params: {
 }
 
 export function computeCombined3TierBenchmarks(
-  tierWorkspaces: Record<TierId, TierWorkspaceState>
+  tierWorkspaces: Record<TierId, TierWorkspaceState>,
+  costConfig: UnitEconomicsCostConfig = DEFAULT_UNIT_ECONOMICS_COSTS
 ) {
+  const unitEcon = computeTierUnitEconomics(tierWorkspaces, costConfig);
   const stages: StageId[] = ["STAGE_1", "STAGE_2", "STAGE_3"];
   return stages.map((stageId) => {
     const t1 = tierWorkspaces.TIER_1;
@@ -114,13 +296,11 @@ export function computeCombined3TierBenchmarks(
     const quarterlyGross = mrr * 3;
     const arr = mrr * 12;
 
-    // Unit Economics Contribution Margin per student/mo (25-min avg briefing vs 30-min max briefing)
-    // Tier 1 ($39): $28.57 (73.3%) | Tier 2 ($139): $96.55 (69.5%) [30m max: $94.12] | Tier 3 ($399): $180.26 (45.2%) [30m max: $176.53]
-    const t1UnitCm = Math.max(0, t1.pricing_config.base_monthly_cad - 10.43);
-    const t2UnitCmAvg25 = Math.max(0, t2.pricing_config.base_monthly_cad - 42.45);
-    const t2UnitCmMax30 = Math.max(0, t2.pricing_config.base_monthly_cad - 44.88);
-    const t3UnitCmAvg25 = Math.max(0, t3.pricing_config.base_monthly_cad - 218.74);
-    const t3UnitCmMax30 = Math.max(0, t3.pricing_config.base_monthly_cad - 222.47);
+    const t1UnitCm = Math.max(0, unitEcon.TIER_1.cmAvg25);
+    const t2UnitCmAvg25 = Math.max(0, unitEcon.TIER_2.cmAvg25);
+    const t2UnitCmMax30 = Math.max(0, unitEcon.TIER_2.cmMax30);
+    const t3UnitCmAvg25 = Math.max(0, unitEcon.TIER_3.cmAvg25);
+    const t3UnitCmMax30 = Math.max(0, unitEcon.TIER_3.cmMax30);
 
     const monthlyContributionMarginAvg25 = Math.round(
       s1Count * t1UnitCm + s2Count * t2UnitCmAvg25 + s3Count * t3UnitCmAvg25
@@ -234,23 +414,54 @@ export function recalculateMonthlyTierRecord(
   const semesterPassCount = record.semester_pass_5mo_count || 0;
   const siblingCount = record.sibling_addon_count || 0;
   const intensiveCount = record.tier3_intensive_addon_count || 0;
+  const discountedCount = record.discounted_accounts_count || 0;
+  const discountedPrice =
+    record.discounted_promo_price_cad !== undefined
+      ? record.discounted_promo_price_cad
+      : record.unit_price_cad;
 
-  const standardMonthlyCount = Math.max(0, endingPaid - semesterPassCount);
+  // Custom promotional or multi-month cohorts (how many accounts sold, for how many months, at what total price)
+  const promoCohorts = record.promo_cohorts || [];
+  const cohortAccountsTotal = promoCohorts.reduce(
+    (sum, c) => sum + (Number(c.accounts_sold) || 0),
+    0
+  );
+  const cohortRecognizedMrr = promoCohorts.reduce((sum, c) => {
+    const acc = Number(c.accounts_sold) || 0;
+    const mos = Math.max(1, Number(c.months_duration) || 1);
+    const totalPrice = Number(c.total_price_per_account_cad) || 0;
+    return sum + Math.round((acc * totalPrice) / mos);
+  }, 0);
+  const cohortCashCollected = promoCohorts.reduce((sum, c) => {
+    const acc = Number(c.accounts_sold) || 0;
+    const totalPrice = Number(c.total_price_per_account_cad) || 0;
+    return sum + acc * totalPrice;
+  }, 0);
+
+  const standardMonthlyCount = Math.max(
+    0,
+    endingPaid - semesterPassCount - discountedCount - cohortAccountsTotal
+  );
   const amortizedPassMrr =
     semesterPassCount * Math.round(pricing.semester_pass_5mo_cad / 5);
+  const discountedMrr = discountedCount * discountedPrice;
   const siblingMrr = siblingCount * pricing.sibling_addon_monthly_cad;
   const intensiveMrr =
     intensiveCount * (pricing.intensive_addon_monthly_cad || 250);
 
   const recognizedMrr =
     standardMonthlyCount * record.unit_price_cad +
+    discountedMrr +
     amortizedPassMrr +
+    cohortRecognizedMrr +
     siblingMrr +
     intensiveMrr;
 
   const cashCollected =
     standardMonthlyCount * record.unit_price_cad +
+    discountedMrr +
     semesterPassCount * pricing.semester_pass_5mo_cad +
+    cohortCashCollected +
     siblingMrr +
     intensiveMrr;
 
@@ -271,98 +482,156 @@ export interface ReportingPeriodOption {
 
 export function getReportingPeriodOptions(
   mode: CalendarReportingMode,
-  fiscalYearStartMonth: 1 | 9 = 1
+  fiscalYearStartMonth: 1 | 9 = 1,
+  maxAcademicStartYear = 2029
 ): ReportingPeriodOption[] {
+  const startYears: number[] = [];
+  for (let y = 2026; y <= Math.max(2027, maxAcademicStartYear); y++) {
+    startYears.push(y);
+  }
+
   if (mode === "ONTARIO_ACADEMIC") {
-    return [
-      {
-        id: "2026-27-SEM-1",
-        label: "2026–27 Sem 1 (Sep–Jan · 5 mo)",
-        mode,
-        monthIds: ["2026-09", "2026-10", "2026-11", "2026-12", "2027-01"],
-      },
-      {
-        id: "2026-27-SEM-2",
-        label: "2026–27 Sem 2 (Feb–Jun · 5 mo)",
-        mode,
-        monthIds: ["2027-02", "2027-03", "2027-04", "2027-05", "2027-06"],
-      },
-      {
-        id: "2027-SUMMER",
-        label: "2027 Summer (Jul–Aug · 2 mo)",
-        mode,
-        monthIds: ["2027-07", "2027-08"],
-      },
-    ];
+    const options: ReportingPeriodOption[] = [];
+    for (const yr of startYears) {
+      const nextYr = yr + 1;
+      const shortNext = String(nextYr).slice(-2);
+      options.push(
+        {
+          id: `${yr}-${shortNext}-SEM-1`,
+          label: `${yr}–${shortNext} Sem 1 (Sep ${yr}–Jan ${nextYr} · 5 mo)`,
+          mode,
+          monthIds: [
+            `${yr}-09`,
+            `${yr}-10`,
+            `${yr}-11`,
+            `${yr}-12`,
+            `${nextYr}-01`,
+          ],
+        },
+        {
+          id: `${yr}-${shortNext}-SEM-2`,
+          label: `${yr}–${shortNext} Sem 2 (Feb–Jun ${nextYr} · 5 mo)`,
+          mode,
+          monthIds: [
+            `${nextYr}-02`,
+            `${nextYr}-03`,
+            `${nextYr}-04`,
+            `${nextYr}-05`,
+            `${nextYr}-06`,
+          ],
+        },
+        {
+          id: `${nextYr}-SUMMER`,
+          label: `${nextYr} Summer (Jul–Aug ${nextYr} · 2 mo)`,
+          mode,
+          monthIds: [`${nextYr}-07`, `${nextYr}-08`],
+        }
+      );
+    }
+    return options;
   }
 
   if (mode === "ACADEMIC_QUARTER") {
-    return [
-      {
-        id: "2026-27-AQ1",
-        label: "AQ1 · Fall (Sep–Nov 2026)",
-        mode,
-        monthIds: ["2026-09", "2026-10", "2026-11"],
-      },
-      {
-        id: "2026-27-AQ2",
-        label: "AQ2 · Winter (Dec–Feb 2027)",
-        mode,
-        monthIds: ["2026-12", "2027-01", "2027-02"],
-      },
-      {
-        id: "2026-27-AQ3",
-        label: "AQ3 · Spring (Mar–May 2027)",
-        mode,
-        monthIds: ["2027-03", "2027-04", "2027-05"],
-      },
-      {
-        id: "2026-27-AQ4",
-        label: "AQ4 · Summer (Jun–Aug 2027)",
-        mode,
-        monthIds: ["2027-06", "2027-07", "2027-08"],
-      },
-    ];
+    const options: ReportingPeriodOption[] = [];
+    for (const yr of startYears) {
+      const nextYr = yr + 1;
+      const shortNext = String(nextYr).slice(-2);
+      options.push(
+        {
+          id: `${yr}-${shortNext}-AQ1`,
+          label: `${yr}–${shortNext} AQ1 · Fall (Sep–Nov ${yr})`,
+          mode,
+          monthIds: [`${yr}-09`, `${yr}-10`, `${yr}-11`],
+        },
+        {
+          id: `${yr}-${shortNext}-AQ2`,
+          label: `${yr}–${shortNext} AQ2 · Winter (Dec ${yr}–Feb ${nextYr})`,
+          mode,
+          monthIds: [`${yr}-12`, `${nextYr}-01`, `${nextYr}-02`],
+        },
+        {
+          id: `${yr}-${shortNext}-AQ3`,
+          label: `${yr}–${shortNext} AQ3 · Spring (Mar–May ${nextYr})`,
+          mode,
+          monthIds: [`${nextYr}-03`, `${nextYr}-04`, `${nextYr}-05`],
+        },
+        {
+          id: `${yr}-${shortNext}-AQ4`,
+          label: `${yr}–${shortNext} AQ4 · Summer (Jun–Aug ${nextYr})`,
+          mode,
+          monthIds: [`${nextYr}-06`, `${nextYr}-07`, `${nextYr}-08`],
+        }
+      );
+    }
+    return options;
   }
 
   // FISCAL_QUARTER
   if (fiscalYearStartMonth === 9) {
-    return [
-      {
-        id: "FY27-Q1-SEP",
-        label: "FY27 Q1 (Sep–Nov 2026 · Sep 1 Fiscal Start)",
-        mode,
-        monthIds: ["2026-09", "2026-10", "2026-11"],
-      },
-      {
-        id: "FY27-Q2-DEC",
-        label: "FY27 Q2 (Dec 2026–Feb 2027)",
-        mode,
-        monthIds: ["2026-12", "2027-01", "2027-02"],
-      },
-    ];
+    const options: ReportingPeriodOption[] = [];
+    for (const yr of startYears) {
+      const nextYr = yr + 1;
+      const fyShort = String(nextYr).slice(-2);
+      options.push(
+        {
+          id: `FY${fyShort}-Q1-SEP`,
+          label: `FY${fyShort} Q1 (Sep–Nov ${yr} · Sep 1 Fiscal Start)`,
+          mode,
+          monthIds: [`${yr}-09`, `${yr}-10`, `${yr}-11`],
+        },
+        {
+          id: `FY${fyShort}-Q2-DEC`,
+          label: `FY${fyShort} Q2 (Dec ${yr}–Feb ${nextYr})`,
+          mode,
+          monthIds: [`${yr}-12`, `${nextYr}-01`, `${nextYr}-02`],
+        },
+        {
+          id: `FY${fyShort}-Q3-MAR`,
+          label: `FY${fyShort} Q3 (Mar–May ${nextYr})`,
+          mode,
+          monthIds: [`${nextYr}-03`, `${nextYr}-04`, `${nextYr}-05`],
+        },
+        {
+          id: `FY${fyShort}-Q4-JUN`,
+          label: `FY${fyShort} Q4 (Jun–Aug ${nextYr})`,
+          mode,
+          monthIds: [`${nextYr}-06`, `${nextYr}-07`, `${nextYr}-08`],
+        }
+      );
+    }
+    return options;
   }
 
-  return [
-    {
-      id: "2026-Q3",
-      label: "2026 Q3 (Jul–Sep 2026 · Jan 1 Fiscal Start)",
-      mode,
-      monthIds: ["2026-07", "2026-08", "2026-09"],
-    },
-    {
-      id: "2026-Q4",
-      label: "2026 Q4 (Oct–Dec 2026 · Jan 1 Fiscal Start)",
-      mode,
-      monthIds: ["2026-10", "2026-11", "2026-12"],
-    },
-    {
-      id: "2026-FULL-FALL",
-      label: "2026 Fall Active Window (Sep–Nov 2026)",
-      mode,
-      monthIds: ["2026-09", "2026-10", "2026-11"],
-    },
-  ];
+  const calOptions: ReportingPeriodOption[] = [];
+  for (let yr = 2026; yr <= Math.max(2027, maxAcademicStartYear + 1); yr++) {
+    calOptions.push(
+      {
+        id: `${yr}-Q1`,
+        label: `${yr} Q1 (Jan–Mar ${yr} · Jan 1 Fiscal Start)`,
+        mode,
+        monthIds: [`${yr}-01`, `${yr}-02`, `${yr}-03`],
+      },
+      {
+        id: `${yr}-Q2`,
+        label: `${yr} Q2 (Apr–Jun ${yr} · Jan 1 Fiscal Start)`,
+        mode,
+        monthIds: [`${yr}-04`, `${yr}-05`, `${yr}-06`],
+      },
+      {
+        id: `${yr}-Q3`,
+        label: `${yr} Q3 (Jul–Sep ${yr} · Jan 1 Fiscal Start)`,
+        mode,
+        monthIds: [`${yr}-07`, `${yr}-08`, `${yr}-09`],
+      },
+      {
+        id: `${yr}-Q4`,
+        label: `${yr} Q4 (Oct–Dec ${yr} · Jan 1 Fiscal Start)`,
+        mode,
+        monthIds: [`${yr}-10`, `${yr}-11`, `${yr}-12`],
+      }
+    );
+  }
+  return calOptions;
 }
 
 export interface AggregatedTierSide {

@@ -94,15 +94,15 @@ export function SkillLibraryView() {
         <div>
           <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-teal-700 mb-1">
             <BookOpen className="w-4 h-4" />
-            Page 2 · CRUD Management (`public.marketing_skills`)
+            AI Playbook Frameworks
           </div>
           <h1 className="text-2xl font-extrabold text-slate-900">
-            Marketing Skill Library & System Prompts
+            Marketing Skill Library &amp; System Prompts
           </h1>
           <p className="text-sm text-slate-600">
-            Create, inspect, edit, and delete the underlying AI marketing
-            frameworks (`ai-seo`, `social-content`, `copywriting`,
-            `copy-editing`, `cro`) that power the Campaign Co-Pilot dropdown.
+            Create, review, and update the marketing frameworks (SEO, social
+            content, copywriting, copy-editing, and conversion optimization)
+            used by the Campaign Co-Pilot.
           </p>
         </div>
 
