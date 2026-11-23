@@ -1,6 +1,7 @@
 import {
   AssetPlatform,
   BrandPersona,
+  CalendarReportingMode,
   CompetitorProfile,
   DetailLevel,
   EditableStageGoal,
@@ -8,7 +9,10 @@ import {
   MandatoryProposalSchema,
   MarketingAgent,
   MarketingSkill,
+  MonthlyMarketingSpend,
+  MonthlyPerformanceRecord,
   MonthlyTierLedgerEntry,
+  MonthlyTierRecord,
   OntarioTrendSignal,
   PlanHorizon,
   PlannedActivity,
@@ -110,24 +114,50 @@ export function computeCombined3TierBenchmarks(
     const quarterlyGross = mrr * 3;
     const arr = mrr * 12;
 
+    // Unit Economics Contribution Margin per student/mo (25-min avg briefing vs 30-min max briefing)
+    // Tier 1 ($39): $28.57 (73.3%) | Tier 2 ($139): $96.55 (69.5%) [30m max: $94.12] | Tier 3 ($399): $180.26 (45.2%) [30m max: $176.53]
+    const t1UnitCm = Math.max(0, t1.pricing_config.base_monthly_cad - 10.43);
+    const t2UnitCmAvg25 = Math.max(0, t2.pricing_config.base_monthly_cad - 42.45);
+    const t2UnitCmMax30 = Math.max(0, t2.pricing_config.base_monthly_cad - 44.88);
+    const t3UnitCmAvg25 = Math.max(0, t3.pricing_config.base_monthly_cad - 218.74);
+    const t3UnitCmMax30 = Math.max(0, t3.pricing_config.base_monthly_cad - 222.47);
+
+    const monthlyContributionMarginAvg25 = Math.round(
+      s1Count * t1UnitCm + s2Count * t2UnitCmAvg25 + s3Count * t3UnitCmAvg25
+    );
+    const monthlyContributionMarginMax30 = Math.round(
+      s1Count * t1UnitCm + s2Count * t2UnitCmMax30 + s3Count * t3UnitCmMax30
+    );
+    const contributionMarginPctAvg25 =
+      mrr > 0 ? Number(((monthlyContributionMarginAvg25 / mrr) * 100).toFixed(1)) : 0;
+    const blendedArpa =
+      totalStudents > 0 ? Number((mrr / totalStudents).toFixed(2)) : 0;
+
     return {
       stageId,
       totalStudents,
       mrr,
       quarterlyGross,
       arr,
+      monthlyContributionMarginAvg25,
+      monthlyContributionMarginMax30,
+      contributionMarginPctAvg25,
+      blendedArpa,
       breakdown: {
         tier1: {
           students: s1Count,
           mrr: s1Count * t1.pricing_config.base_monthly_cad,
+          contributionMargin: Math.round(s1Count * t1UnitCm),
         },
         tier2: {
           students: s2Count,
           mrr: s2Count * t2.pricing_config.base_monthly_cad,
+          contributionMargin: Math.round(s2Count * t2UnitCmAvg25),
         },
         tier3: {
           students: s3Count,
           mrr: s3Count * t3.pricing_config.base_monthly_cad,
+          contributionMargin: Math.round(s3Count * t3UnitCmAvg25),
         },
       },
     };
@@ -184,6 +214,492 @@ export function recalculateLedgerEntryTotals(
     semester_pass_cash_collected_cad: semesterPassCash,
     total_gross_cash_cad: totalGrossCash,
     blended_cac_cad: blendedCac,
+  };
+}
+
+// ============================================================================
+// SECTION 3. FINANCE-READY MONTHLY ATOMIC LEDGER & DUAL-VIEW CLOSING ENGINE
+// ============================================================================
+
+export function recalculateMonthlyTierRecord(
+  record: MonthlyTierRecord,
+  pricing: TierPricingConfig
+): MonthlyTierRecord {
+  const endingPaid = Math.max(
+    0,
+    record.starting_paid_students +
+      record.new_paid_students -
+      record.churned_students
+  );
+  const semesterPassCount = record.semester_pass_5mo_count || 0;
+  const siblingCount = record.sibling_addon_count || 0;
+  const intensiveCount = record.tier3_intensive_addon_count || 0;
+
+  const standardMonthlyCount = Math.max(0, endingPaid - semesterPassCount);
+  const amortizedPassMrr =
+    semesterPassCount * Math.round(pricing.semester_pass_5mo_cad / 5);
+  const siblingMrr = siblingCount * pricing.sibling_addon_monthly_cad;
+  const intensiveMrr =
+    intensiveCount * (pricing.intensive_addon_monthly_cad || 250);
+
+  const recognizedMrr =
+    standardMonthlyCount * record.unit_price_cad +
+    amortizedPassMrr +
+    siblingMrr +
+    intensiveMrr;
+
+  const cashCollected =
+    standardMonthlyCount * record.unit_price_cad +
+    semesterPassCount * pricing.semester_pass_5mo_cad +
+    siblingMrr +
+    intensiveMrr;
+
+  return {
+    ...record,
+    ending_paid_students: endingPaid,
+    recognized_mrr_cad: recognizedMrr,
+    cash_collected_cad: cashCollected,
+  };
+}
+
+export interface ReportingPeriodOption {
+  id: string;
+  label: string;
+  mode: CalendarReportingMode;
+  monthIds: string[];
+}
+
+export function getReportingPeriodOptions(
+  mode: CalendarReportingMode,
+  fiscalYearStartMonth: 1 | 9 = 1
+): ReportingPeriodOption[] {
+  if (mode === "ONTARIO_ACADEMIC") {
+    return [
+      {
+        id: "2026-27-SEM-1",
+        label: "2026–27 Sem 1 (Sep–Jan · 5 mo)",
+        mode,
+        monthIds: ["2026-09", "2026-10", "2026-11", "2026-12", "2027-01"],
+      },
+      {
+        id: "2026-27-SEM-2",
+        label: "2026–27 Sem 2 (Feb–Jun · 5 mo)",
+        mode,
+        monthIds: ["2027-02", "2027-03", "2027-04", "2027-05", "2027-06"],
+      },
+      {
+        id: "2027-SUMMER",
+        label: "2027 Summer (Jul–Aug · 2 mo)",
+        mode,
+        monthIds: ["2027-07", "2027-08"],
+      },
+    ];
+  }
+
+  if (mode === "ACADEMIC_QUARTER") {
+    return [
+      {
+        id: "2026-27-AQ1",
+        label: "AQ1 · Fall (Sep–Nov 2026)",
+        mode,
+        monthIds: ["2026-09", "2026-10", "2026-11"],
+      },
+      {
+        id: "2026-27-AQ2",
+        label: "AQ2 · Winter (Dec–Feb 2027)",
+        mode,
+        monthIds: ["2026-12", "2027-01", "2027-02"],
+      },
+      {
+        id: "2026-27-AQ3",
+        label: "AQ3 · Spring (Mar–May 2027)",
+        mode,
+        monthIds: ["2027-03", "2027-04", "2027-05"],
+      },
+      {
+        id: "2026-27-AQ4",
+        label: "AQ4 · Summer (Jun–Aug 2027)",
+        mode,
+        monthIds: ["2027-06", "2027-07", "2027-08"],
+      },
+    ];
+  }
+
+  // FISCAL_QUARTER
+  if (fiscalYearStartMonth === 9) {
+    return [
+      {
+        id: "FY27-Q1-SEP",
+        label: "FY27 Q1 (Sep–Nov 2026 · Sep 1 Fiscal Start)",
+        mode,
+        monthIds: ["2026-09", "2026-10", "2026-11"],
+      },
+      {
+        id: "FY27-Q2-DEC",
+        label: "FY27 Q2 (Dec 2026–Feb 2027)",
+        mode,
+        monthIds: ["2026-12", "2027-01", "2027-02"],
+      },
+    ];
+  }
+
+  return [
+    {
+      id: "2026-Q3",
+      label: "2026 Q3 (Jul–Sep 2026 · Jan 1 Fiscal Start)",
+      mode,
+      monthIds: ["2026-07", "2026-08", "2026-09"],
+    },
+    {
+      id: "2026-Q4",
+      label: "2026 Q4 (Oct–Dec 2026 · Jan 1 Fiscal Start)",
+      mode,
+      monthIds: ["2026-10", "2026-11", "2026-12"],
+    },
+    {
+      id: "2026-FULL-FALL",
+      label: "2026 Fall Active Window (Sep–Nov 2026)",
+      mode,
+      monthIds: ["2026-09", "2026-10", "2026-11"],
+    },
+  ];
+}
+
+export interface AggregatedTierSide {
+  starting_paid_students: number;
+  ending_paid_students: number;
+  new_leads: number;
+  diagnostics_or_consults_completed: number;
+  new_paid_students: number;
+  referral_or_organic_new_students: number;
+  upgraded_to_higher_tier: number;
+  churned_students: number;
+  cash_collected_cad: number;
+  recognized_mrr_cad: number;
+  ending_mrr_cad: number;
+  tier3_intensive_addon_count: number;
+}
+
+export interface ComputedSideKpis {
+  recognizedRevenueCad: number;
+  cashCollectedCad: number;
+  endingMrrCad: number;
+  startingStudents: number;
+  endingStudents: number;
+  newLeads: number;
+  diagnosticsCompleted: number;
+  newPaidStudents: number;
+  referralOrOrganicNew: number;
+  upgradedStudents: number;
+  churnedStudents: number;
+  totalSpendCad: number;
+  spendBreakdown: MonthlyMarketingSpend;
+  blendedArpaCad: number;
+  cplCad: number | null;
+  blendedCacCad: number | null;
+  organicReferralSharePct: number;
+  leadToDiagRatePct: number;
+  diagToPaidRatePct: number;
+  tierUpgradeRatePct: number;
+  avgMonthlyLogoChurnPct: number;
+  ltvCad: number;
+  ltvToCacRatio: number | null;
+  cacPaybackMonths: number | null;
+  merRatio: number | null;
+}
+
+export interface PeriodRollupResult {
+  monthsIncluded: string[];
+  monthsCount: number;
+  statusLabel: "PLANNING" | "IN_PROGRESS" | "CLOSED";
+  byTierTarget: Record<TierId, AggregatedTierSide>;
+  byTierActual: Record<TierId, AggregatedTierSide>;
+  targetKpis: ComputedSideKpis;
+  actualKpis: ComputedSideKpis;
+  revenueAttainmentPct: number;
+  studentAttainmentPct: number;
+}
+
+function aggregateSideForRecords(
+  records: MonthlyPerformanceRecord[],
+  side: "targets" | "actuals"
+): {
+  byTier: Record<TierId, AggregatedTierSide>;
+  kpis: ComputedSideKpis;
+} {
+  const tiers: TierId[] = ["TIER_1", "TIER_2", "TIER_3"];
+  const monthsCount = Math.max(1, records.length);
+  const firstRecord = records[0];
+  const lastRecord = records[records.length - 1];
+
+  const byTier = {} as Record<TierId, AggregatedTierSide>;
+
+  for (const tid of tiers) {
+    const startStudents = firstRecord
+      ? firstRecord[side][tid].starting_paid_students
+      : 0;
+    const endStudents = lastRecord
+      ? lastRecord[side][tid].ending_paid_students
+      : 0;
+    const endMrr = lastRecord ? lastRecord[side][tid].recognized_mrr_cad : 0;
+
+    let newLeads = 0;
+    let diagCompleted = 0;
+    let newPaid = 0;
+    let referralNew = 0;
+    let upgraded = 0;
+    let churned = 0;
+    let cashCollected = 0;
+    let recognizedRevenue = 0;
+    let intensiveAddons = 0;
+
+    for (const r of records) {
+      const tr = r[side][tid];
+      newLeads += tr.new_leads;
+      diagCompleted += tr.diagnostics_or_consults_completed;
+      newPaid += tr.new_paid_students;
+      referralNew += tr.referral_or_organic_new_students;
+      upgraded += tr.upgraded_to_higher_tier;
+      churned += tr.churned_students;
+      cashCollected += tr.cash_collected_cad;
+      recognizedRevenue += tr.recognized_mrr_cad;
+      intensiveAddons = tr.tier3_intensive_addon_count || intensiveAddons;
+    }
+
+    byTier[tid] = {
+      starting_paid_students: startStudents,
+      ending_paid_students: endStudents,
+      new_leads: newLeads,
+      diagnostics_or_consults_completed: diagCompleted,
+      new_paid_students: newPaid,
+      referral_or_organic_new_students: referralNew,
+      upgraded_to_higher_tier: upgraded,
+      churned_students: churned,
+      cash_collected_cad: cashCollected,
+      recognized_mrr_cad: recognizedRevenue,
+      ending_mrr_cad: endMrr,
+      tier3_intensive_addon_count: intensiveAddons,
+    };
+  }
+
+  // Sum across all 3 tiers
+  const startingStudents =
+    byTier.TIER_1.starting_paid_students +
+    byTier.TIER_2.starting_paid_students +
+    byTier.TIER_3.starting_paid_students;
+  const endingStudents =
+    byTier.TIER_1.ending_paid_students +
+    byTier.TIER_2.ending_paid_students +
+    byTier.TIER_3.ending_paid_students;
+  const endingMrrCad =
+    byTier.TIER_1.ending_mrr_cad +
+    byTier.TIER_2.ending_mrr_cad +
+    byTier.TIER_3.ending_mrr_cad;
+  const recognizedRevenueCad =
+    byTier.TIER_1.recognized_mrr_cad +
+    byTier.TIER_2.recognized_mrr_cad +
+    byTier.TIER_3.recognized_mrr_cad;
+  const cashCollectedCad =
+    byTier.TIER_1.cash_collected_cad +
+    byTier.TIER_2.cash_collected_cad +
+    byTier.TIER_3.cash_collected_cad;
+
+  const newLeads =
+    byTier.TIER_1.new_leads +
+    byTier.TIER_2.new_leads +
+    byTier.TIER_3.new_leads;
+  const diagnosticsCompleted =
+    byTier.TIER_1.diagnostics_or_consults_completed +
+    byTier.TIER_2.diagnostics_or_consults_completed +
+    byTier.TIER_3.diagnostics_or_consults_completed;
+  const newPaidStudents =
+    byTier.TIER_1.new_paid_students +
+    byTier.TIER_2.new_paid_students +
+    byTier.TIER_3.new_paid_students;
+  const referralOrOrganicNew =
+    byTier.TIER_1.referral_or_organic_new_students +
+    byTier.TIER_2.referral_or_organic_new_students +
+    byTier.TIER_3.referral_or_organic_new_students;
+  const upgradedStudents =
+    byTier.TIER_1.upgraded_to_higher_tier +
+    byTier.TIER_2.upgraded_to_higher_tier +
+    byTier.TIER_3.upgraded_to_higher_tier;
+  const churnedStudents =
+    byTier.TIER_1.churned_students +
+    byTier.TIER_2.churned_students +
+    byTier.TIER_3.churned_students;
+
+  // Spend breakdown
+  const spendKey = side === "targets" ? "spend_target" : "spend_actual";
+  const spendBreakdown: MonthlyMarketingSpend = {
+    paid_ads_cad: 0,
+    events_seminars_cad: 0,
+    referral_credits_cad: 0,
+    marketing_tools_cad: 0,
+  };
+  for (const r of records) {
+    const sp = r[spendKey];
+    spendBreakdown.paid_ads_cad += sp.paid_ads_cad;
+    spendBreakdown.events_seminars_cad += sp.events_seminars_cad;
+    spendBreakdown.referral_credits_cad += sp.referral_credits_cad;
+    spendBreakdown.marketing_tools_cad += sp.marketing_tools_cad;
+  }
+  const totalSpendCad =
+    spendBreakdown.paid_ads_cad +
+    spendBreakdown.events_seminars_cad +
+    spendBreakdown.referral_credits_cad +
+    spendBreakdown.marketing_tools_cad;
+
+  // Safe Ratio Recomputations (Zero-Division Guarded)
+  const blendedArpaCad =
+    endingStudents > 0
+      ? Number((endingMrrCad / endingStudents).toFixed(2))
+      : 0;
+  const cplCad =
+    newLeads > 0 ? Number((totalSpendCad / newLeads).toFixed(2)) : null;
+  const blendedCacCad =
+    newPaidStudents > 0
+      ? Number((totalSpendCad / newPaidStudents).toFixed(2))
+      : null;
+  const organicReferralSharePct =
+    newPaidStudents > 0
+      ? Number(((referralOrOrganicNew / newPaidStudents) * 100).toFixed(1))
+      : 0;
+  const leadToDiagRatePct =
+    newLeads > 0
+      ? Number(((diagnosticsCompleted / newLeads) * 100).toFixed(1))
+      : 0;
+  const diagToPaidRatePct =
+    diagnosticsCompleted > 0
+      ? Number(((newPaidStudents / diagnosticsCompleted) * 100).toFixed(1))
+      : 0;
+
+  const startingLowerTierStudents =
+    byTier.TIER_1.starting_paid_students +
+    byTier.TIER_2.starting_paid_students;
+  const tierUpgradeRatePct =
+    startingLowerTierStudents > 0
+      ? Number(
+          ((upgradedStudents / startingLowerTierStudents) * 100).toFixed(1)
+        )
+      : 0;
+
+  const avgActiveStudents = (startingStudents + endingStudents) / 2;
+  const avgMonthlyLogoChurnPct =
+    avgActiveStudents > 0
+      ? Number(
+          ((churnedStudents / avgActiveStudents / monthsCount) * 100).toFixed(
+            2
+          )
+        )
+      : 0;
+
+  // LTV = Blended ARPA / Monthly Churn Rate, conservatively capped at 10 months (2 Ontario semesters) if churn is 0%
+  const monthlyChurnDecimal = avgMonthlyLogoChurnPct / 100;
+  const rawMonthsLifetime =
+    monthlyChurnDecimal > 0 ? Math.min(10, 1 / monthlyChurnDecimal) : 10;
+  const ltvCad = Number((blendedArpaCad * rawMonthsLifetime).toFixed(2));
+
+  const ltvToCacRatio =
+    blendedCacCad !== null && blendedCacCad > 0
+      ? Number((ltvCad / blendedCacCad).toFixed(1))
+      : null;
+
+  const cacPaybackMonths =
+    blendedCacCad !== null && blendedArpaCad > 0
+      ? Number((blendedCacCad / blendedArpaCad).toFixed(1))
+      : 0;
+
+  const merRatio =
+    totalSpendCad > 0
+      ? Number((recognizedRevenueCad / totalSpendCad).toFixed(2))
+      : null;
+
+  return {
+    byTier,
+    kpis: {
+      recognizedRevenueCad,
+      cashCollectedCad,
+      endingMrrCad,
+      startingStudents,
+      endingStudents,
+      newLeads,
+      diagnosticsCompleted,
+      newPaidStudents,
+      referralOrOrganicNew,
+      upgradedStudents,
+      churnedStudents,
+      totalSpendCad,
+      spendBreakdown,
+      blendedArpaCad,
+      cplCad,
+      blendedCacCad,
+      organicReferralSharePct,
+      leadToDiagRatePct,
+      diagToPaidRatePct,
+      tierUpgradeRatePct,
+      avgMonthlyLogoChurnPct,
+      ltvCad,
+      ltvToCacRatio,
+      cacPaybackMonths,
+      merRatio,
+    },
+  };
+}
+
+export function aggregateMonthlyPerformancePeriod(
+  allRecords: MonthlyPerformanceRecord[],
+  monthIds: string[]
+): PeriodRollupResult {
+  const matching = allRecords
+    .filter((r) => monthIds.includes(r.month_id))
+    .sort((a, b) => a.month_id.localeCompare(b.month_id));
+
+  const activeRecords = matching.length > 0 ? matching : allRecords;
+  const targetAgg = aggregateSideForRecords(activeRecords, "targets");
+  const actualAgg = aggregateSideForRecords(activeRecords, "actuals");
+
+  const allClosed =
+    activeRecords.length > 0 &&
+    activeRecords.every((r) => r.status === "CLOSED");
+  const anyInProgress = activeRecords.some((r) => r.status === "IN_PROGRESS");
+  const statusLabel = allClosed
+    ? "CLOSED"
+    : anyInProgress
+    ? "IN_PROGRESS"
+    : "PLANNING";
+
+  const revenueAttainmentPct =
+    targetAgg.kpis.recognizedRevenueCad > 0
+      ? Number(
+          (
+            (actualAgg.kpis.recognizedRevenueCad /
+              targetAgg.kpis.recognizedRevenueCad) *
+            100
+          ).toFixed(1)
+        )
+      : 0;
+
+  const studentAttainmentPct =
+    targetAgg.kpis.endingStudents > 0
+      ? Number(
+          (
+            (actualAgg.kpis.endingStudents / targetAgg.kpis.endingStudents) *
+            100
+          ).toFixed(1)
+        )
+      : 0;
+
+  return {
+    monthsIncluded: activeRecords.map((r) => r.month_id),
+    monthsCount: activeRecords.length,
+    statusLabel,
+    byTierTarget: targetAgg.byTier,
+    byTierActual: actualAgg.byTier,
+    targetKpis: targetAgg.kpis,
+    actualKpis: actualAgg.kpis,
+    revenueAttainmentPct,
+    studentAttainmentPct,
   };
 }
 

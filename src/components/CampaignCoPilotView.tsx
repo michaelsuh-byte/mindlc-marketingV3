@@ -370,7 +370,7 @@ export function CampaignCoPilotView() {
               <span>Draft</span>
             </button>
 
-            {/* Pill 2: ⚠️ Risks & Kill (Tiny amber dot until clicked once) */}
+            {/* Pill 2: ⚠️ Risks & Stop-Loss (Tiny amber dot until clicked once) */}
             <button
               onClick={() => {
                 setActiveSubView("risks");
@@ -383,7 +383,7 @@ export function CampaignCoPilotView() {
               }`}
             >
               <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-              <span>Risks &amp; Kill</span>
+              <span>Risks &amp; Stop-Loss</span>
               {!hasInspectedRisks && (
                 <span
                   className="w-2 h-2 rounded-full bg-amber-500"
@@ -392,7 +392,7 @@ export function CampaignCoPilotView() {
               )}
             </button>
 
-            {/* Pill 3: 🗣️ VoC & Diff */}
+            {/* Pill 3: 🗣️ Parent Quotes & Changes */}
             <button
               onClick={() => setActiveSubView("voc_diff")}
               className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
@@ -402,7 +402,7 @@ export function CampaignCoPilotView() {
               }`}
             >
               <MessageSquareQuote className="w-3.5 h-3.5 text-indigo-600" />
-              <span>VoC &amp; Diff</span>
+              <span>Parent Quotes &amp; Changes</span>
               <span className="text-[10px] font-mono text-slate-400">
                 v{versionHistory.length || 1}
               </span>

@@ -3,6 +3,7 @@ import {
   Asset,
   AssetPlatform,
   BrandPersona,
+  CalendarReportingMode,
   Campaign,
   CampaignStatus,
   ChatMessage,
@@ -13,7 +14,10 @@ import {
   HITLProposalState,
   MarketingAgent,
   MarketingSkill,
+  MonthlyMarketingSpend,
+  MonthlyPerformanceRecord,
   MonthlyTierLedgerEntry,
+  MonthlyTierRecord,
   OntarioTrendSignal,
   PeriodClosingStatus,
   PlanHorizon,
@@ -41,10 +45,12 @@ import {
   generateMarketingResponse,
   getRecommendedStageForTier,
   recalculateLedgerEntryTotals,
+  recalculateMonthlyTierRecord,
 } from "@/services/marketingAi";
 
 export type NavigationTab =
   | "copilot"
+  | "closing"
   | "planner"
   | "intel"
   | "skills"
@@ -61,6 +67,12 @@ interface MarketingState {
   activeTierId: TierId;
   tierWorkspaces: Record<TierId, TierWorkspaceState>;
   vocVault: VerbatimParentQuote[];
+
+  // Section 3: Finance-Ready Monthly Atomic Ledger & Dual-View Closing State
+  monthlyPerformanceRecords: MonthlyPerformanceRecord[];
+  calendarReportingMode: CalendarReportingMode;
+  selectedReportingPeriodId: string;
+  fiscalYearStartMonth: 1 | 9;
 
   // Active Tier Synchronized Mirrors
   assets: Asset[];
@@ -126,6 +138,32 @@ interface MarketingState {
     entryId: string,
     nextStatus: PeriodClosingStatus
   ) => void;
+
+  // Section 3 Actions: Monthly Atomic Ledger & Dual-View Closing Platform
+  setCalendarReportingMode: (mode: CalendarReportingMode) => void;
+  setSelectedReportingPeriodId: (periodId: string) => void;
+  setFiscalYearStartMonth: (month: 1 | 9) => void;
+  updateMonthlyPerformanceTierRecord: (
+    monthId: string,
+    side: "targets" | "actuals",
+    tierId: TierId,
+    partialRecord: Partial<MonthlyTierRecord>
+  ) => void;
+  updateMonthlyMarketingSpend: (
+    monthId: string,
+    side: "spend_target" | "spend_actual",
+    partialSpend: Partial<MonthlyMarketingSpend>
+  ) => void;
+  updateMonthlyClosingNotes: (
+    monthId: string,
+    closingNotes: string,
+    aiDiagnosticSummary?: string
+  ) => void;
+  syncMonthlyActualsFromRealityLogs: (monthId: string) => void;
+  runAiPeriodReview: (periodId: string) => void;
+  closeMonthlyPerformancePeriod: (monthId: string) => void;
+  clearSampleDataAndReset: () => void;
+  restoreSampleDataSeed: () => void;
 
   // On-Demand Modal & Drawer Toggles
   setStageFunnelModalOpen: (open: boolean) => void;
@@ -1540,6 +1578,360 @@ const INITIAL_CHAT: ChatMessage[] = [
   },
 ];
 
+// ============================================================================
+// SECTION 3 & 5: SEEDED MONTHLY ATOMIC LEDGER RECORDS (2026-09, 2026-10, 2026-11)
+// ============================================================================
+const INITIAL_MONTHLY_PERFORMANCE_RECORDS: MonthlyPerformanceRecord[] = [
+  {
+    month_id: "2026-09",
+    month_label: "September 2026 (Ontario Sem 1 Launch)",
+    status: "CLOSED",
+    is_sample: true,
+    targets: {
+      TIER_1: {
+        tier_id: "TIER_1",
+        unit_price_cad: 39,
+        starting_paid_students: 0,
+        new_leads: 180,
+        diagnostics_or_consults_completed: 50,
+        new_paid_students: 6,
+        referral_or_organic_new_students: 2,
+        upgraded_to_higher_tier: 0,
+        churned_students: 0,
+        ending_paid_students: 6,
+        cash_collected_cad: 234,
+        recognized_mrr_cad: 234,
+      },
+      TIER_2: {
+        tier_id: "TIER_2",
+        unit_price_cad: 139,
+        starting_paid_students: 0,
+        new_leads: 45,
+        diagnostics_or_consults_completed: 12,
+        new_paid_students: 3,
+        referral_or_organic_new_students: 1,
+        upgraded_to_higher_tier: 0,
+        churned_students: 0,
+        ending_paid_students: 3,
+        cash_collected_cad: 417,
+        recognized_mrr_cad: 417,
+      },
+      TIER_3: {
+        tier_id: "TIER_3",
+        unit_price_cad: 399,
+        tier3_intensive_addon_count: 0,
+        starting_paid_students: 0,
+        new_leads: 6,
+        diagnostics_or_consults_completed: 3,
+        new_paid_students: 1,
+        referral_or_organic_new_students: 0,
+        upgraded_to_higher_tier: 0,
+        churned_students: 0,
+        ending_paid_students: 1,
+        cash_collected_cad: 399,
+        recognized_mrr_cad: 399,
+      },
+    },
+    actuals: {
+      TIER_1: {
+        tier_id: "TIER_1",
+        unit_price_cad: 39,
+        semester_pass_5mo_count: 1,
+        sibling_addon_count: 0,
+        starting_paid_students: 0,
+        new_leads: 165,
+        diagnostics_or_consults_completed: 44,
+        new_paid_students: 4,
+        referral_or_organic_new_students: 1,
+        upgraded_to_higher_tier: 0,
+        churned_students: 0,
+        ending_paid_students: 4,
+        cash_collected_cad: 282, // 3 * $39 + 1 * $165 5-mo pass
+        recognized_mrr_cad: 150, // 3 * $39 + 1 * $33 amortized pass
+      },
+      TIER_2: {
+        tier_id: "TIER_2",
+        unit_price_cad: 139,
+        semester_pass_5mo_count: 1,
+        sibling_addon_count: 0,
+        starting_paid_students: 0,
+        new_leads: 48,
+        diagnostics_or_consults_completed: 14,
+        new_paid_students: 3,
+        referral_or_organic_new_students: 1,
+        upgraded_to_higher_tier: 0,
+        churned_students: 0,
+        ending_paid_students: 3,
+        cash_collected_cad: 868, // 2 * $139 + 1 * $590 5-mo pass
+        recognized_mrr_cad: 396, // 2 * $139 + 1 * $118 amortized pass
+      },
+      TIER_3: {
+        tier_id: "TIER_3",
+        unit_price_cad: 399,
+        tier3_intensive_addon_count: 0,
+        starting_paid_students: 0,
+        new_leads: 5,
+        diagnostics_or_consults_completed: 2,
+        new_paid_students: 0,
+        referral_or_organic_new_students: 0,
+        upgraded_to_higher_tier: 0,
+        churned_students: 0,
+        ending_paid_students: 0,
+        cash_collected_cad: 0,
+        recognized_mrr_cad: 0,
+      },
+    },
+    spend_target: {
+      paid_ads_cad: 150,
+      events_seminars_cad: 100,
+      referral_credits_cad: 0,
+      marketing_tools_cad: 120,
+    },
+    spend_actual: {
+      paid_ads_cad: 120,
+      events_seminars_cad: 85,
+      referral_credits_cad: 0,
+      marketing_tools_cad: 120,
+    },
+    closing_notes:
+      "September back-to-school launch validated initial 5-month Semester Pass demand ($165 Tier 1 and $590 Tier 2). Cash collected ($1,150 CAD) exceeded recognized MRR ($546 CAD) due to upfront semester pass bookings.",
+    ai_diagnostic_summary:
+      "Top Wins: 1) Tier 2 Diagnostic-to-Paid hit 21.4% (3/14) with zero refund requests. 2) Upfront 5-month Semester Passes generated $755 in upfront cash flow. Biggest Funnel Leak: Tier 1 account creation wall before diagnostic score caused 38% drop-off. Next Period Adjustment: Remove account wall before diagnostic result card and launch 10-minute K/T/C/A parent debrief script.",
+  },
+  {
+    month_id: "2026-10",
+    month_label: "October 2026 (Early Unit-Test Window)",
+    status: "CLOSED",
+    is_sample: true,
+    targets: {
+      TIER_1: {
+        tier_id: "TIER_1",
+        unit_price_cad: 39,
+        starting_paid_students: 4,
+        new_leads: 250,
+        diagnostics_or_consults_completed: 70,
+        new_paid_students: 6,
+        referral_or_organic_new_students: 2,
+        upgraded_to_higher_tier: 1,
+        churned_students: 0,
+        ending_paid_students: 10,
+        cash_collected_cad: 390,
+        recognized_mrr_cad: 390,
+      },
+      TIER_2: {
+        tier_id: "TIER_2",
+        unit_price_cad: 139,
+        starting_paid_students: 3,
+        new_leads: 60,
+        diagnostics_or_consults_completed: 16,
+        new_paid_students: 4,
+        referral_or_organic_new_students: 1,
+        upgraded_to_higher_tier: 1,
+        churned_students: 0,
+        ending_paid_students: 7,
+        cash_collected_cad: 973,
+        recognized_mrr_cad: 973,
+      },
+      TIER_3: {
+        tier_id: "TIER_3",
+        unit_price_cad: 399,
+        tier3_intensive_addon_count: 1,
+        starting_paid_students: 0,
+        new_leads: 8,
+        diagnostics_or_consults_completed: 3,
+        new_paid_students: 1,
+        referral_or_organic_new_students: 0,
+        upgraded_to_higher_tier: 0,
+        churned_students: 0,
+        ending_paid_students: 1,
+        cash_collected_cad: 649,
+        recognized_mrr_cad: 649,
+      },
+    },
+    actuals: {
+      TIER_1: {
+        tier_id: "TIER_1",
+        unit_price_cad: 39,
+        semester_pass_5mo_count: 1,
+        sibling_addon_count: 1,
+        starting_paid_students: 4,
+        new_leads: 240,
+        diagnostics_or_consults_completed: 64,
+        new_paid_students: 3,
+        referral_or_organic_new_students: 1,
+        upgraded_to_higher_tier: 1,
+        churned_students: 0,
+        ending_paid_students: 6,
+        cash_collected_cad: 379,
+        recognized_mrr_cad: 247,
+      },
+      TIER_2: {
+        tier_id: "TIER_2",
+        unit_price_cad: 139,
+        semester_pass_5mo_count: 1,
+        sibling_addon_count: 1,
+        starting_paid_students: 3,
+        new_leads: 58,
+        diagnostics_or_consults_completed: 16,
+        new_paid_students: 3,
+        referral_or_organic_new_students: 1,
+        upgraded_to_higher_tier: 1,
+        churned_students: 0,
+        ending_paid_students: 5,
+        cash_collected_cad: 753,
+        recognized_mrr_cad: 753,
+      },
+      TIER_3: {
+        tier_id: "TIER_3",
+        unit_price_cad: 399,
+        tier3_intensive_addon_count: 1,
+        starting_paid_students: 0,
+        new_leads: 9,
+        diagnostics_or_consults_completed: 3,
+        new_paid_students: 1,
+        referral_or_organic_new_students: 0,
+        upgraded_to_higher_tier: 0,
+        churned_students: 0,
+        ending_paid_students: 1,
+        cash_collected_cad: 649, // $399 base (4x60m) + $250 Intensive Add-on (8x60m)
+        recognized_mrr_cad: 649,
+      },
+    },
+    spend_target: {
+      paid_ads_cad: 200,
+      events_seminars_cad: 150,
+      referral_credits_cad: 50,
+      marketing_tools_cad: 120,
+    },
+    spend_actual: {
+      paid_ads_cad: 180,
+      events_seminars_cad: 140,
+      referral_credits_cad: 40,
+      marketing_tools_cad: 120,
+    },
+    closing_notes:
+      "First Tier 2 Flag A Cognitive Overload student upgraded to Tier 3 Prime 1:1 ($399 base + $250 Intensive 8×60-min Add-on = $649/mo). Tutor-integrated monthly 25–30 min parent briefing saved $29.12/mo duplicate manager cost.",
+    ai_diagnostic_summary:
+      "Top Wins: 1) Tier 2 -> Tier 3 Flag A upgrade path validated at $649/mo (8 × 60-minute sessions/mo). 2) Zero logo churn across Tier 1, Tier 2, and Tier 3 in Month 2. Biggest Funnel Leak: Cold '24/7 AI Math Bot' community post triggered parent anti-cheating fears (VOC-101) and was killed at 14.3% conversion. Next Period Adjustment: Lead every November midterm campaign with Growing Success (K/T/C/A) Thinking rubric gaps and Human Learning Manager accountability.",
+  },
+  {
+    month_id: "2026-11",
+    month_label: "November 2026 (Midterm Report Card Window)",
+    status: "IN_PROGRESS",
+    is_sample: true,
+    targets: {
+      TIER_1: {
+        tier_id: "TIER_1",
+        unit_price_cad: 39,
+        starting_paid_students: 6,
+        new_leads: 450,
+        diagnostics_or_consults_completed: 125,
+        new_paid_students: 10,
+        referral_or_organic_new_students: 3,
+        upgraded_to_higher_tier: 1,
+        churned_students: 1,
+        ending_paid_students: 15,
+        cash_collected_cad: 640,
+        recognized_mrr_cad: 585,
+      },
+      TIER_2: {
+        tier_id: "TIER_2",
+        unit_price_cad: 139,
+        starting_paid_students: 5,
+        new_leads: 80,
+        diagnostics_or_consults_completed: 20,
+        new_paid_students: 5,
+        referral_or_organic_new_students: 2,
+        upgraded_to_higher_tier: 1,
+        churned_students: 0,
+        ending_paid_students: 10,
+        cash_collected_cad: 1548,
+        recognized_mrr_cad: 1390,
+      },
+      TIER_3: {
+        tier_id: "TIER_3",
+        unit_price_cad: 399,
+        tier3_intensive_addon_count: 1,
+        starting_paid_students: 1,
+        new_leads: 15,
+        diagnostics_or_consults_completed: 5,
+        new_paid_students: 2,
+        referral_or_organic_new_students: 1,
+        upgraded_to_higher_tier: 0,
+        churned_students: 0,
+        ending_paid_students: 3,
+        cash_collected_cad: 1447,
+        recognized_mrr_cad: 1447,
+      },
+    },
+    actuals: {
+      TIER_1: {
+        tier_id: "TIER_1",
+        unit_price_cad: 39,
+        semester_pass_5mo_count: 2,
+        sibling_addon_count: 3,
+        starting_paid_students: 6,
+        new_leads: 420,
+        diagnostics_or_consults_completed: 120,
+        new_paid_students: 7,
+        referral_or_organic_new_students: 2,
+        upgraded_to_higher_tier: 1,
+        churned_students: 1,
+        ending_paid_students: 12,
+        cash_collected_cad: 777,
+        recognized_mrr_cad: 513,
+      },
+      TIER_2: {
+        tier_id: "TIER_2",
+        unit_price_cad: 139,
+        semester_pass_5mo_count: 2,
+        sibling_addon_count: 2,
+        starting_paid_students: 5,
+        new_leads: 64,
+        diagnostics_or_consults_completed: 14,
+        new_paid_students: 3,
+        referral_or_organic_new_students: 1,
+        upgraded_to_higher_tier: 1,
+        churned_students: 0,
+        ending_paid_students: 8,
+        cash_collected_cad: 1710,
+        recognized_mrr_cad: 1228,
+      },
+      TIER_3: {
+        tier_id: "TIER_3",
+        unit_price_cad: 399,
+        tier3_intensive_addon_count: 1,
+        starting_paid_students: 1,
+        new_leads: 18,
+        diagnostics_or_consults_completed: 6,
+        new_paid_students: 1,
+        referral_or_organic_new_students: 0,
+        upgraded_to_higher_tier: 0,
+        churned_students: 0,
+        ending_paid_students: 2,
+        cash_collected_cad: 1048, // 2 * $399 + 1 * $250 Intensive Add-on
+        recognized_mrr_cad: 1048,
+      },
+    },
+    spend_target: {
+      paid_ads_cad: 250,
+      events_seminars_cad: 180,
+      referral_credits_cad: 80,
+      marketing_tools_cad: 120,
+    },
+    spend_actual: {
+      paid_ads_cad: 190,
+      events_seminars_cad: 150,
+      referral_credits_cad: 60,
+      marketing_tools_cad: 120,
+    },
+    closing_notes:
+      "Ontario Midterm Report Card window active. Combined Ending MRR is $2,789/mo across 22 active students (12 T1, 8 T2, 2 T3) with $3,535 CAD gross cash collected in November. Hiring trigger for first part-time Learning Manager ($26/hr + 12% statutory load = $29.12/hr) set at 18–20 Tier 2 students for smooth handover at 25 students.",
+    ai_diagnostic_summary:
+      "Top Wins: 1) MER (Marketing Efficiency Ratio) reached 5.36x ($2,789 Recognized MRR on $520 total spend). 2) Tier 2 + Tier 3 account for 81.6% ($2,276/mo) of recognized monthly revenue from just 10 students. Biggest Funnel Leak: Tier 2 Diag-to-Paid is 21.4% (3/14) vs 25.0% Stage 1 target due to 48-hour spouse-consultation delay after the debrief call. Next Period Adjustment: Trigger the 72-Hr Undecided Parent Follow-Up email + 1-page K/T/C/A report pre-send 24 hours before the 25–30 min parent briefing.",
+  },
+];
+
 function syncMirrorsFromTier(ws: TierWorkspaceState) {
   return {
     assets: ws.proposals,
@@ -1571,6 +1963,12 @@ export const useMarketingStore = create<MarketingState>((set, get) => {
     tierWorkspaces: INITIAL_TIER_WORKSPACES,
     vocVault: INITIAL_VOC_VAULT,
 
+    // Section 3: Finance-Ready Monthly Atomic Ledger & Dual-View Closing State
+    monthlyPerformanceRecords: INITIAL_MONTHLY_PERFORMANCE_RECORDS,
+    calendarReportingMode: "ONTARIO_ACADEMIC",
+    selectedReportingPeriodId: "2026-27-SEM-1",
+    fiscalYearStartMonth: 1,
+
     ...syncMirrorsFromTier(initialWs),
 
     activeCampaignId: "camp-ontario-fall",
@@ -1583,11 +1981,11 @@ export const useMarketingStore = create<MarketingState>((set, get) => {
     brandPersona: {
       companyName: "MindLC",
       planNameAndPrice:
-        "3-Tier Ontario STEM Architecture ($39 Online · $139 Managed · $349 Prime 1:1)",
+        "3-Tier Ontario STEM Architecture ($39 Online · $139 Managed · $399 Prime 1:1 [4×60m] / $649 Intensive [8×60m])",
       targetAudience:
         "Ontario parents & students in Grades 9–12 STEM (MPM2D, MCR3U, MHF4U, MCV4U, SBI3U, SCH4U, SPH4U).",
       coreHook:
-        "Tier 1: 24/7 Socratic Voice + LaTeX HUD Self-Coach ($39/mo) | Tier 2: Managed Hybrid with Growing Success K/T/C/A Reports & Human Learning Manager ($139/mo) | Tier 3: Prime 1:1 Live Online Educator + 24/7 Socratic AI ($349/mo).",
+        "Tier 1: 24/7 Socratic Voice + LaTeX HUD Self-Coach ($39/mo) | Tier 2: Managed Hybrid with Growing Success K/T/C/A Reports & Human Learning Manager ($139/mo) | Tier 3: Prime 1:1 Live Online Educator (4×60-min/mo at $399/mo or 8×60-min/mo Intensive at $649/mo) + 24/7 Socratic AI + Tutor-Integrated Monthly 25–30 Min Briefing.",
       curriculumFocus:
         "Ontario Ministry of Education Grades 9–12 STEM & Growing Success (K/T/C/A) Achievement Chart.",
       brandVoice:
@@ -1778,6 +2176,354 @@ export const useMarketingStore = create<MarketingState>((set, get) => {
           diagnosticToast: `[${ws.tier_short_name}] Monthly Ledger Period updated to ${nextStatus}.`,
         };
       }),
+
+    setCalendarReportingMode: (mode) =>
+      set(() => {
+        const nextPeriod =
+          mode === "ONTARIO_ACADEMIC"
+            ? "2026-27-SEM-1"
+            : mode === "ACADEMIC_QUARTER"
+            ? "2026-27-AQ1"
+            : "2026-Q4";
+        return {
+          calendarReportingMode: mode,
+          selectedReportingPeriodId: nextPeriod,
+        };
+      }),
+
+    setSelectedReportingPeriodId: (periodId) =>
+      set({ selectedReportingPeriodId: periodId }),
+
+    setFiscalYearStartMonth: (month) =>
+      set({
+        fiscalYearStartMonth: month,
+        selectedReportingPeriodId: month === 9 ? "FY27-Q1-SEP" : "2026-Q4",
+      }),
+
+    updateMonthlyPerformanceTierRecord: (monthId, side, tierId, partialRecord) =>
+      set((state) => {
+        const pricing = state.tierWorkspaces[tierId].pricing_config;
+        const updatedRecords = state.monthlyPerformanceRecords.map((rec) => {
+          if (rec.month_id !== monthId) return rec;
+          const currentTierRec = rec[side][tierId];
+          const recalculated = recalculateMonthlyTierRecord(
+            {
+              ...currentTierRec,
+              unit_price_cad: pricing.base_monthly_cad,
+              ...partialRecord,
+            },
+            pricing
+          );
+          return {
+            ...rec,
+            [side]: {
+              ...rec[side],
+              [tierId]: recalculated,
+            },
+          };
+        });
+
+        // If editing the latest month actuals, sync the tier's current_paid_count
+        const latestRec = updatedRecords[updatedRecords.length - 1];
+        if (latestRec && latestRec.month_id === monthId && side === "actuals") {
+          const ws = state.tierWorkspaces[tierId];
+          const newEnding = latestRec.actuals[tierId].ending_paid_students;
+          const updatedWs: TierWorkspaceState = {
+            ...ws,
+            current_paid_count: newEnding,
+            active_stage: ws.manual_stage_override
+              ? ws.active_stage
+              : getRecommendedStageForTier(tierId, newEnding),
+          };
+          return {
+            monthlyPerformanceRecords: updatedRecords,
+            tierWorkspaces: { ...state.tierWorkspaces, [tierId]: updatedWs },
+            ...(tierId === state.activeTierId
+              ? syncMirrorsFromTier(updatedWs)
+              : {}),
+          };
+        }
+
+        return { monthlyPerformanceRecords: updatedRecords };
+      }),
+
+    updateMonthlyMarketingSpend: (monthId, side, partialSpend) =>
+      set((state) => ({
+        monthlyPerformanceRecords: state.monthlyPerformanceRecords.map((rec) =>
+          rec.month_id === monthId
+            ? {
+                ...rec,
+                [side]: {
+                  ...rec[side],
+                  ...partialSpend,
+                },
+              }
+            : rec
+        ),
+      })),
+
+    updateMonthlyClosingNotes: (monthId, closingNotes, aiDiagnosticSummary) =>
+      set((state) => ({
+        monthlyPerformanceRecords: state.monthlyPerformanceRecords.map((rec) =>
+          rec.month_id === monthId
+            ? {
+                ...rec,
+                closing_notes: closingNotes,
+                ai_diagnostic_summary:
+                  aiDiagnosticSummary !== undefined
+                    ? aiDiagnosticSummary
+                    : rec.ai_diagnostic_summary,
+              }
+            : rec
+        ),
+      })),
+
+    syncMonthlyActualsFromRealityLogs: (monthId) =>
+      set((state) => {
+        const updatedRecords = state.monthlyPerformanceRecords.map((rec) => {
+          if (rec.month_id !== monthId) return rec;
+          const nextActuals = { ...rec.actuals };
+
+          (["TIER_1", "TIER_2", "TIER_3"] as TierId[]).forEach((tid) => {
+            const ws = state.tierWorkspaces[tid];
+            const latestLog = ws.weekly_reality_logs[0];
+            if (!latestLog) return;
+            const current = nextActuals[tid];
+            nextActuals[tid] = recalculateMonthlyTierRecord(
+              {
+                ...current,
+                new_leads: Math.max(
+                  current.new_leads,
+                  latestLog.funnel_metrics.reach_or_contacts
+                ),
+                diagnostics_or_consults_completed: Math.max(
+                  current.diagnostics_or_consults_completed,
+                  latestLog.funnel_metrics.diag_completed
+                ),
+                new_paid_students: Math.max(
+                  current.new_paid_students,
+                  latestLog.funnel_metrics.paid_conversions
+                ),
+              },
+              ws.pricing_config
+            );
+          });
+
+          return {
+            ...rec,
+            actuals: nextActuals,
+          };
+        });
+
+        return {
+          monthlyPerformanceRecords: updatedRecords,
+          diagnosticToast: `Synced ${monthId} Monthly Atomic Ledger actuals from the latest Weekly Reality Gate logs across all 3 Tiers.`,
+        };
+      }),
+
+    runAiPeriodReview: (periodId) =>
+      set((state) => {
+        const updatedRecords = state.monthlyPerformanceRecords.map((rec) => ({
+          ...rec,
+          ai_diagnostic_summary: `AI Period Audit (${periodId} · Grounded in ${rec.month_id}):\n1. Top Wins: Tier 2 ($139/mo Managed Hybrid) and Tier 3 ($399/mo 4×60-min Base + $250/mo 8×60-min Intensive Add-on) generated 81.6% of recognized monthly revenue with 0% refund disputes.\n2. Biggest Funnel Leak: Tier 2 Diagnostic-to-Paid conversion (21.4% vs 25.0% Stage 1 target) stalls when parents wait 48 hours after the 10-minute debrief call.\n3. Next-Period Playbook & Hiring Trigger: Pre-send the 1-page K/T/C/A Cognitive Report 24 hours before the monthly 25–30 min parent briefing, and initiate part-time Learning Manager recruitment ($26/hr + 12% statutory load = $29.12/hr) at 18–20 Tier 2 students ahead of the 25-student full handover.`,
+        }));
+        return {
+          monthlyPerformanceRecords: updatedRecords,
+          diagnosticToast: `Generated AI Period Debrief & Unit Economics Audit for ${periodId}.`,
+        };
+      }),
+
+    closeMonthlyPerformancePeriod: (monthId) =>
+      set((state) => {
+        const sorted = [...state.monthlyPerformanceRecords].sort((a, b) =>
+          a.month_id.localeCompare(b.month_id)
+        );
+        const idx = sorted.findIndex((r) => r.month_id === monthId);
+        if (idx === -1) return state;
+
+        const targetRec = { ...sorted[idx], status: "CLOSED" as const };
+        sorted[idx] = targetRec;
+
+        // Roll ending student counts forward to next period's starting baseline
+        if (idx + 1 < sorted.length) {
+          const nextRec = { ...sorted[idx + 1] };
+          const nextActuals = { ...nextRec.actuals };
+          (["TIER_1", "TIER_2", "TIER_3"] as TierId[]).forEach((tid) => {
+            const rolledStart = targetRec.actuals[tid].ending_paid_students;
+            nextActuals[tid] = recalculateMonthlyTierRecord(
+              {
+                ...nextActuals[tid],
+                starting_paid_students: rolledStart,
+              },
+              state.tierWorkspaces[tid].pricing_config
+            );
+          });
+          sorted[idx + 1] = {
+            ...nextRec,
+            actuals: nextActuals,
+          };
+        } else {
+          // Automatically create the next calendar month record with rolled-forward starting counts
+          const [yrStr, moStr] = monthId.split("-");
+          const yr = parseInt(yrStr, 10);
+          const mo = parseInt(moStr, 10);
+          const nextDate = mo === 12 ? `${yr + 1}-01` : `${yr}-${String(mo + 1).padStart(2, "0")}`;
+          const newNextRecord: MonthlyPerformanceRecord = {
+            month_id: nextDate,
+            month_label: `${nextDate} (Rolled Forward Baseline)`,
+            status: "IN_PROGRESS",
+            targets: { ...targetRec.targets },
+            actuals: {
+              TIER_1: recalculateMonthlyTierRecord(
+                {
+                  ...targetRec.actuals.TIER_1,
+                  starting_paid_students: targetRec.actuals.TIER_1.ending_paid_students,
+                  new_leads: 0,
+                  diagnostics_or_consults_completed: 0,
+                  new_paid_students: 0,
+                  referral_or_organic_new_students: 0,
+                  upgraded_to_higher_tier: 0,
+                  churned_students: 0,
+                },
+                state.tierWorkspaces.TIER_1.pricing_config
+              ),
+              TIER_2: recalculateMonthlyTierRecord(
+                {
+                  ...targetRec.actuals.TIER_2,
+                  starting_paid_students: targetRec.actuals.TIER_2.ending_paid_students,
+                  new_leads: 0,
+                  diagnostics_or_consults_completed: 0,
+                  new_paid_students: 0,
+                  referral_or_organic_new_students: 0,
+                  upgraded_to_higher_tier: 0,
+                  churned_students: 0,
+                },
+                state.tierWorkspaces.TIER_2.pricing_config
+              ),
+              TIER_3: recalculateMonthlyTierRecord(
+                {
+                  ...targetRec.actuals.TIER_3,
+                  starting_paid_students: targetRec.actuals.TIER_3.ending_paid_students,
+                  new_leads: 0,
+                  diagnostics_or_consults_completed: 0,
+                  new_paid_students: 0,
+                  referral_or_organic_new_students: 0,
+                  upgraded_to_higher_tier: 0,
+                  churned_students: 0,
+                },
+                state.tierWorkspaces.TIER_3.pricing_config
+              ),
+            },
+            spend_target: { ...targetRec.spend_target },
+            spend_actual: {
+              paid_ads_cad: 0,
+              events_seminars_cad: 0,
+              referral_credits_cad: 0,
+              marketing_tools_cad: 120,
+            },
+            closing_notes: `Rolled ending student baselines forward from closed month ${monthId}.`,
+          };
+          sorted.push(newNextRecord);
+        }
+
+        return {
+          monthlyPerformanceRecords: sorted,
+          diagnosticToast: `Closed & locked month ${monthId} and rolled ending student counts forward to the next period baseline.`,
+        };
+      }),
+
+    clearSampleDataAndReset: () =>
+      set((state) => {
+        const zeroedRecords: MonthlyPerformanceRecord[] = [
+          {
+            month_id: "2026-11",
+            month_label: "November 2026 (Clean Live Workspace)",
+            status: "IN_PROGRESS",
+            is_sample: false,
+            targets: INITIAL_MONTHLY_PERFORMANCE_RECORDS[2].targets,
+            actuals: {
+              TIER_1: {
+                tier_id: "TIER_1",
+                unit_price_cad: state.tierWorkspaces.TIER_1.pricing_config.base_monthly_cad,
+                starting_paid_students: 0,
+                new_leads: 0,
+                diagnostics_or_consults_completed: 0,
+                new_paid_students: 0,
+                referral_or_organic_new_students: 0,
+                upgraded_to_higher_tier: 0,
+                churned_students: 0,
+                ending_paid_students: 0,
+                cash_collected_cad: 0,
+                recognized_mrr_cad: 0,
+              },
+              TIER_2: {
+                tier_id: "TIER_2",
+                unit_price_cad: state.tierWorkspaces.TIER_2.pricing_config.base_monthly_cad,
+                starting_paid_students: 0,
+                new_leads: 0,
+                diagnostics_or_consults_completed: 0,
+                new_paid_students: 0,
+                referral_or_organic_new_students: 0,
+                upgraded_to_higher_tier: 0,
+                churned_students: 0,
+                ending_paid_students: 0,
+                cash_collected_cad: 0,
+                recognized_mrr_cad: 0,
+              },
+              TIER_3: {
+                tier_id: "TIER_3",
+                unit_price_cad: state.tierWorkspaces.TIER_3.pricing_config.base_monthly_cad,
+                tier3_intensive_addon_count: 0,
+                starting_paid_students: 0,
+                new_leads: 0,
+                diagnostics_or_consults_completed: 0,
+                new_paid_students: 0,
+                referral_or_organic_new_students: 0,
+                upgraded_to_higher_tier: 0,
+                churned_students: 0,
+                ending_paid_students: 0,
+                cash_collected_cad: 0,
+                recognized_mrr_cad: 0,
+              },
+            },
+            spend_target: INITIAL_MONTHLY_PERFORMANCE_RECORDS[2].spend_target,
+            spend_actual: {
+              paid_ads_cad: 0,
+              events_seminars_cad: 0,
+              referral_credits_cad: 0,
+              marketing_tools_cad: 0,
+            },
+            closing_notes: "Sample data cleared. Ready for live monthly ledger entries.",
+            ai_diagnostic_summary: "Sample data cleared. Log live monthly actuals or sync from Weekly Reality Gate to generate AI period debrief.",
+          },
+        ];
+
+        const cleanedWorkspaces = { ...state.tierWorkspaces };
+        (["TIER_1", "TIER_2", "TIER_3"] as TierId[]).forEach((tid) => {
+          cleanedWorkspaces[tid] = {
+            ...cleanedWorkspaces[tid],
+            current_paid_count: 0,
+            active_stage: "STAGE_1",
+          };
+        });
+
+        return {
+          monthlyPerformanceRecords: zeroedRecords,
+          tierWorkspaces: cleanedWorkspaces,
+          ...syncMirrorsFromTier(cleanedWorkspaces[state.activeTierId]),
+          isSampleSeedActive: false,
+          diagnosticToast: "Cleared sample data seed. Zero-division guards active across all 10 KPIs + MER.",
+        };
+      }),
+
+    restoreSampleDataSeed: () =>
+      set((state) => ({
+        monthlyPerformanceRecords: INITIAL_MONTHLY_PERFORMANCE_RECORDS,
+        tierWorkspaces: INITIAL_TIER_WORKSPACES,
+        ...syncMirrorsFromTier(INITIAL_TIER_WORKSPACES[state.activeTierId]),
+        isSampleSeedActive: true,
+        diagnosticToast: "Restored 3-month Ontario STEM sample data seed (2026-09, 2026-10, 2026-11).",
+      })),
 
     setStageFunnelModalOpen: (open) =>
       set({

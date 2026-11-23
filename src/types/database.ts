@@ -203,6 +203,55 @@ export interface TierPricingConfig {
 
 export type PeriodClosingStatus = "OPEN" | "AUDITED" | "CLOSED_AND_LOCKED";
 
+// ============================================================================
+// SECTION 3. FINANCE-READY MONTHLY ATOMIC LEDGER & DUAL-VIEW CLOSING SCHEMA
+// ============================================================================
+
+export interface MonthlyTierRecord {
+  tier_id: TierId;
+  unit_price_cad: number; // Defaults: 39, 139, 399
+  tier3_intensive_addon_count?: number; // Number of Tier 3 students paying +$250/mo (8x60m)
+  semester_pass_5mo_count?: number; // Upfront 5-month semester pass enrollments
+  sibling_addon_count?: number; // Sibling add-ons (+$19, +$79, +$349)
+  starting_paid_students: number;
+  new_leads: number;
+  diagnostics_or_consults_completed: number;
+  new_paid_students: number;
+  referral_or_organic_new_students: number;
+  upgraded_to_higher_tier: number; // Tier 1->2 or Tier 2->3
+  churned_students: number;
+  ending_paid_students: number;
+  // Finance-ready split (handles 5-month upfront Semester Passes cleanly):
+  cash_collected_cad: number; // Actual Stripe/cash bookings received in this month
+  recognized_mrr_cad: number; // Earned monthly revenue (includes Tier 3 +$250 add-ons)
+}
+
+export interface MonthlyMarketingSpend {
+  // Maps 1:1 to future Finance App OpEx accounts
+  paid_ads_cad: number;
+  events_seminars_cad: number;
+  referral_credits_cad: number;
+  marketing_tools_cad: number;
+}
+
+export interface MonthlyPerformanceRecord {
+  month_id: string; // Primary Key: "YYYY-MM" (e.g., "2026-11")
+  month_label?: string; // e.g., "November 2026"
+  status: "PLANNING" | "IN_PROGRESS" | "CLOSED";
+  targets: Record<TierId, MonthlyTierRecord>;
+  actuals: Record<TierId, MonthlyTierRecord>;
+  spend_target: MonthlyMarketingSpend;
+  spend_actual: MonthlyMarketingSpend;
+  closing_notes: string;
+  ai_diagnostic_summary?: string;
+  is_sample?: boolean;
+}
+
+export type CalendarReportingMode =
+  | "ONTARIO_ACADEMIC"
+  | "ACADEMIC_QUARTER"
+  | "FISCAL_QUARTER";
+
 export interface MonthlyTierLedgerEntry {
   id: string;
   period_month: string; // e.g., "2026-11" (YYYY-MM)
